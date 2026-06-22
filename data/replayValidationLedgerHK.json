@@ -1,0 +1,63 @@
+{
+  "version": "v31.5.3",
+  "scope": "H-K replay validation learning ledger",
+  "status": "research-only",
+  "items": [
+    {
+      "ticker": "HDFCBANK.NS",
+      "preferredChart": "incorporation provisional",
+      "secondary": "merger chart required",
+      "learning": "institutional repair can begin before clean expansion; both legacy charts missed early-2026 decline",
+      "capital": "tactical part-sized; strategic conditional until merger chart tested"
+    },
+    {
+      "ticker": "HINDZINC.NS",
+      "preferredChart": "incorporation only provisional",
+      "secondary": "listing missing",
+      "learning": "tactical yes / strategic conditional / passive no without dated protection",
+      "capital": "protect before Feb-Mar 2026 reset window"
+    },
+    {
+      "ticker": "ICICIBANK.NS",
+      "preferredChart": "incorporation",
+      "secondary": "listing pressure false-break caution",
+      "learning": "durable lender support can survive pressure; Saturn-node is not automatic break",
+      "capital": "tactical yes; strategic yes; passive long-term yes"
+    },
+    {
+      "ticker": "INFY.NS",
+      "preferredChart": "incorporation",
+      "secondary": "listing early pressure warning",
+      "learning": "listing caught top pressure onset; incorporation caught decisive break; post-break inheritance needed",
+      "capital": "tactical yes; strategic conditional; passive long-term no without protection"
+    },
+    {
+      "ticker": "JIOFIN.NS",
+      "preferredChart": "record date / demerger",
+      "secondary": "listing pressure overlay",
+      "learning": "record-date charts can capture newly separated financial identities better than old incorporation",
+      "capital": "tactical part-sized; strategic conditional; passive not yet proven"
+    },
+    {
+      "ticker": "KEI",
+      "preferredChart": "listing",
+      "secondary": "incorporation pressure caution",
+      "learning": "Jupiter-Venus/Mars exact support can mark vertical acceleration despite macro pressure",
+      "capital": "tactical/strategic active with later protection"
+    },
+    {
+      "ticker": "KPITTECH",
+      "preferredChart": "incorporation",
+      "secondary": "listing pressure caution",
+      "learning": "mature-cycle expansion is not fresh strategic capital",
+      "capital": "hold winner/tactical only; avoid passive fresh entry"
+    },
+    {
+      "ticker": "KAYNES.NS",
+      "preferredChart": "listing",
+      "secondary": "incorporation business-cycle caution",
+      "learning": "active rally-with-churn before Sep-Oct acceleration; false dormancy from window selector",
+      "capital": "part-sized now; acceleration Sep-Oct; protect into 2025"
+    }
+  ]
+}

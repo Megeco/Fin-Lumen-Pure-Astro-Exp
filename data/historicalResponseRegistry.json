@@ -1,0 +1,44 @@
+[
+  {
+    "id": "BEL.NS|Jupiter->rahu:trine|2016-02-26|pilot-reviewed",
+    "ticker": "BEL.NS",
+    "companyName": "Bharat Electronics Limited",
+    "transitFamily": "Jupiter->rahu:trine",
+    "eventDate": "2016-02-26",
+    "sectorId": "electronicsManufacturing",
+    "sectors": ["electronicsManufacturing", "defence"],
+    "macroPressure": null,
+    "macroExpansion": null,
+    "clusters": [],
+    "priorAstroState": null,
+    "transitEpisode": {
+      "planet": "Jupiter",
+      "targetPlanet": "rahu",
+      "aspect": "trine",
+      "orbEntry": "2015-10-17",
+      "orbExit": "2016-04-20",
+      "exactHits": ["2015-11-19", "2015-11-22", "2016-02-23", "2016-02-26"],
+      "peak": {"date": "2016-02-26", "orb": 0.07, "score": 7.36, "transitSign": "Leo"}
+    },
+    "observedResponse": {
+      "classification": "RALLY, DRAWDOWN, THEN REPAIR",
+      "return30d": 0.1884,
+      "return60d": 0.1472,
+      "return90d": 0.1437,
+      "return180d": null,
+      "maxGain90d": null,
+      "maxDrawdown90d": null,
+      "sequence": "The multi-pass episode first coincided with strength into December 2015, then a sharp decline into the February 2016 exact pass, followed by a recovery rather than clean durable leadership."
+    },
+    "evidenceSource": {
+      "type": "pilot-reviewed-monthly-price-audit",
+      "priceFrequency": "monthly",
+      "note": "Seeded only to validate the display-only historical panel. Replace with automated daily-price metrics when the archive builder is run in a network-enabled environment."
+    },
+    "review": {
+      "humanReviewed": true,
+      "notes": "Pilot evidence record; observational only; no score impact.",
+      "promotedRule": false
+    }
+  }
+]

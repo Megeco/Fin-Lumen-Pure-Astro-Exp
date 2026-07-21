@@ -26,17 +26,29 @@ function normalizeActionLabel(action) {
   const raw = String(action || "WATCH CLOSELY").trim().toUpperCase();
 
   if (raw.includes("AGGRESSIVE") || raw.includes("PRIORITY")) return "AGGRESSIVE ACCUMULATION";
-  if (raw.includes("EXIT STRENGTH") || raw.includes("REDUCE") || raw.includes("EXIT")) return "EXIT STRENGTH";
+
+  // v33.5 visual/action cleanup:
+  // The Action Bucket must match the legend. "No fresh" is not its own bucket;
+  // it is a fresh-capital qualifier. The bucket remains HOLD CORE unless a real
+  // trim/exit instruction is present. Gate/wait language maps to WATCH CLOSELY.
+  if (raw.includes("EXIT STRENGTH")) return "EXIT STRENGTH";
   if (raw.includes("HEAVY")) return "HEAVY TRIM";
   if (raw.includes("TRIM")) return "TRIM SATELLITE";
-  if (raw.includes("PRESSURE FIRST") || raw.includes("AVOID") || raw.includes("WAIT") || raw.includes("WATCHLIST")) return "WATCH CLOSELY";
+  if (raw.includes("REDUCE") || raw.includes("USE RALLIES TO REDUCE") || raw.includes("PROTECT EXCESS")) return "TRIM SATELLITE";
+
+  if (raw.includes("WAIT FOR DATED TRIGGER") || raw.includes("ASTRO GATE PENDING") || raw.includes("NATAL/ASTRO DATA GATE") || raw.includes("WATCHLIST") || raw.includes("WATCH ONLY") || raw.includes("WATCH CLOSELY")) return "WATCH CLOSELY";
+
+  // Exact NO FRESH is a fresh-capital qualifier, not a separate legend tile.
+  // Embedded phrases like "HOLD CORE / NO FRESH" still map to HOLD CORE for the main action bucket.
+  if (raw === "NO FRESH" || raw === "WATCHLIST ONLY") return "NO FRESH";
+  if (raw.includes("NO FRESH") || raw.includes("HOLD CORE / NO FRESH") || raw.includes("BLOCK FRESH") || raw.includes("AVOID FRESH") || raw.includes("PROTECT / OBSERVE")) return "HOLD CORE";
+  if (raw.includes("PRESSURE FIRST") || raw.includes("AVOID") || raw.includes("WAIT")) return "WATCH CLOSELY";
 
   // Important: do not treat the phrase "not vertically" as a vertical-leader signal.
   // v30.04D was mapping "STAGGER ADD — deploy gradually, not vertically" into HOLD WINNER.
   if (raw.includes("STAGGER") || raw.includes("RALLY WITH CHURN") || raw.includes("BUILDING RERATING") || raw.includes("VOLATILE RERATING")) return "STAGGER ADD";
   if (raw.includes("ACCUMULATE")) return "ACCUMULATE";
-  if (raw.includes("HOLD CONSTRUCTIVE CORE")) return "HOLD CONSTRUCTIVE CORE";
-  if (raw.includes("HIGH-VOLTAGE") || raw.includes("HOLD WINNER") || /\bVERTICAL (LEADER|RERATING|EXPANSION)\b/.test(raw)) return "HOLD WINNER";
+  if (raw.includes("HIGH-VOLTAGE") || raw.includes("HOLD WINNER") || /VERTICAL (LEADER|RERATING|EXPANSION)/.test(raw)) return "HOLD WINNER";
   if (raw.includes("HOLD")) return "HOLD CORE";
   if (raw.includes("WATCH")) return "WATCH CLOSELY";
 
@@ -51,9 +63,11 @@ function actionVisual(action) {
     "HEAVY TRIM": { label, color: "#ea580c", textColor: "#ffffff", shape: "square" },
     "TRIM SATELLITE": { label, color: "#facc15", textColor: "#422006", shape: "square" },
     "WATCH CLOSELY": { label, color: "#9ca3af", textColor: "#111827", shape: "octagon" },
+    "NO FRESH": { label: "NO FRESH", color: "#2563eb", textColor: "#ffffff", shape: "circle" },
+    "NO FRESH ENTRY": { label: "NO FRESH", color: "#2563eb", textColor: "#ffffff", shape: "circle" },
+    "HOLD CORE / NO FRESH": { label: "HOLD CORE", color: "#2563eb", textColor: "#ffffff", shape: "circle" },
     "HOLD WINNER": { label, color: "#0f766e", textColor: "#ffffff", shape: "circle" },
     "HOLD CORE": { label, color: "#2563eb", textColor: "#ffffff", shape: "circle" },
-    "HOLD CONSTRUCTIVE CORE": { label, color: "#14b8a6", textColor: "#ffffff", shape: "circle" },
     "STAGGER ADD": { label, color: "#bbf7d0", textColor: "#14532d", shape: "circle-outline" },
     "ACCUMULATE": { label, color: "#16a34a", textColor: "#ffffff", shape: "circle" },
     "AGGRESSIVE ACCUMULATION": { label, color: "#00c2c7", textColor: "#083344", shape: "star" }
@@ -238,10 +252,24 @@ function selectedStockFrom(stocks, selectedStockId) {
   return stocks.find(item => String(stockKey(item)) === String(selectedStockId)) || null;
 }
 
+function normalizeUiDate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const m = raw.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (m) {
+    const dd = String(m[1]).padStart(2, "0");
+    const mm = String(m[2]).padStart(2, "0");
+    return `${m[3]}-${mm}-${dd}`;
+  }
+  return raw;
+}
+
 export default function Home() {
   const [stocks, setStocks] = useState([]);
   const [environment, setEnvironment] = useState(null);
   const [newStock, setNewStock] = useState("");
+  const [addStockMessage, setAddStockMessage] = useState("");
   const [selectedStock, setSelectedStock] = useState("");
   const [researchView, setResearchView] = useState(false);
   const [tableFilter, setTableFilter] = useState("ALL");
@@ -387,24 +415,50 @@ export default function Home() {
     setNatalSaveMessage("Saving natal data...");
 
     try {
+      const payload = {
+        ...natalForm,
+        birthDate: normalizeUiDate(natalForm.birthDate)
+      };
+
       const res = await fetch("/api/upsert-natal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(natalForm)
+        body: JSON.stringify(payload)
       });
 
-      const data = await res.json();
+      let data = null;
+      const text = await res.text();
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = { success: false, error: text || `HTTP ${res.status}` };
+      }
+
+      if (!res.ok && !data?.success) {
+        setNatalSaveMessage(data?.error || `Natal save failed with HTTP ${res.status}.`);
+        return;
+      }
 
       if (!data?.success) {
         setNatalSaveMessage(data?.error || "Natal save failed. Supabase natal_registry table may need to be created.");
         return;
       }
 
-      setNatalSaveMessage("Natal data saved. Refreshing stock computation...");
-      await fetchStocks(true);
-      setNatalSaveMessage("Natal data saved and stock computation refreshed.");
+      const storage = data?.storage || "supabase";
+      const savedForSession = storage === "runtime-memory";
+      const baseMessage = savedForSession
+        ? (data?.warning || data?.note || "Natal data saved for this session. Supabase persistence is unavailable. The project can be active while permanent writes are blocked by missing SERVICE_ROLE_KEY, RLS policy, table/schema mismatch, or env-variable mismatch.")
+        : (data?.warning || "Natal data saved.");
+
+      setNatalSaveMessage(`${baseMessage} Refreshing stock computation...`);
+      try {
+        await fetchStocks(true);
+        setNatalSaveMessage(`${baseMessage} Stock computation refreshed.`);
+      } catch (refreshErr) {
+        setNatalSaveMessage(`${baseMessage} Refresh failed: ${refreshErr.message || refreshErr}`);
+      }
     } catch (err) {
-      setNatalSaveMessage(err.message);
+      setNatalSaveMessage(`Natal save could not reach the app API: ${err.message || err}. Please redeploy and check /api/upsert-natal.`);
     }
   };
 
@@ -489,20 +543,32 @@ export default function Home() {
         <button
           onClick={async () => {
             if (!newStock) return;
+            setAddStockMessage("Adding stock...");
 
-            await fetch("/api/add-stock", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: newStock })
-            });
-
-            setNewStock("");
-            await fetchStocks();
+            try {
+              const res = await fetch("/api/add-stock", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: newStock })
+              });
+              const data = await res.json();
+              if (!data?.success) {
+                setAddStockMessage(data?.error || "Could not add stock.");
+                return;
+              }
+              setNewStock("");
+              setAddStockMessage(data?.warning || "Stock added. Add natal data next if needed.");
+              await fetchStocks(true);
+            } catch (err) {
+              setAddStockMessage(err.message || "Could not add stock.");
+            }
           }}
           style={buttonStyle("#16a34a")}
         >
           Add Stock
         </button>
+
+        {addStockMessage ? <span style={smallMutedStyle}>{addStockMessage}</span> : null}
 
         <select
           value={selectedStock}
@@ -642,7 +708,7 @@ export default function Home() {
             checked={researchView}
             onChange={() => setResearchView(!researchView)}
           />
-          Research View
+          Research View — full table
         </label>
       </div>
 
@@ -829,12 +895,12 @@ function macroEventRole(event) {
 function macroForwardCategory(event) {
   const role = macroEventRole(event);
   if (role === "eclipse") return "Eclipse / reset watch";
-  if (role === "crisis") return "Crisis-node / volatility watch";
-  if (role === "retrograde") return "Retrograde / reversal watch";
-  if (role === "pressure") return "Pressure / trim watch";
-  if (role === "support") return "Support / repair watch";
-  if (role === "expansion") return "Expansion watch";
-  return "Transition / rotation watch";
+  if (role === "crisis") return "Crisis-node / volatility gate";
+  if (role === "retrograde") return "Retrograde / reversal gate";
+  if (role === "pressure") return "Pressure / trim gates";
+  if (role === "support") return "Support / repair gate";
+  if (role === "expansion") return "Expansion gate";
+  return "Transition / rotation gate";
 }
 
 function macroForwardAction(event) {
@@ -845,7 +911,7 @@ function macroForwardAction(event) {
   if (role === "pressure") return "protect heat in directly-hit charts";
   if (role === "support") return "selective repair/support for receptive natal charts";
   if (role === "expansion") return "stagger into clean natal leadership only";
-  return "rotation watch; stock-specific natal contact decides";
+  return "rotation gate; stock-specific natal contact decides";
 }
 
 function macroForwardWatchItems(environment) {
@@ -891,7 +957,7 @@ function macroForwardRecommendation(items) {
     return "Recommendation: HOLD CORE; stagger only into stocks with clean natal expansion, low dormancy, and no hard pressure. Protect excess around crisis-node or retrograde gates.";
   }
   if (hasCrisis) {
-    return "Recommendation: HOLD CORE / WATCH CLOSELY — protect excess in directly-hit charts; avoid fresh chase until pressure clears.";
+    return "Recommendation: HOLD CORE / USE ASTRO GATES — protect excess in directly-hit charts; avoid fresh chase until pressure clears.";
   }
   if (hasExpansion) {
     return "Recommendation: STAGGER ADD selectively — only where natal leadership is active and dormancy is low.";
@@ -921,7 +987,7 @@ function MacroForwardWatch({ environment }) {
   if (!items.length) {
     return (
       <div style={insightBoxStyle}>
-        <strong>Key 30-day watch:</strong>
+        <strong>Key 30-day astro gates:</strong>
         <div style={{ marginTop: 6 }}>No major expansion, pressure, eclipse, crisis-node, retrograde, or cluster gate is active.</div>
         <div
           style={{
@@ -943,7 +1009,7 @@ function MacroForwardWatch({ environment }) {
 
   return (
     <div style={insightBoxStyle}>
-      <strong>Key 30-day watch:</strong>
+      <strong>Key 30-day astro gates:</strong>
       <div style={{ marginTop: 6, display: "grid", gap: 5 }}>
         {items.map((event, index) => (
           <div key={`${macroEventName(event)}-${index}`}>
@@ -1169,6 +1235,7 @@ function ActionShape({ visual, size = 16 }) {
 
 function ActionBadge({ action, compact = false }) {
   const visual = actionVisual(action);
+  const displayLabel = visual.label;
 
   return (
     <span
@@ -1177,19 +1244,34 @@ function ActionBadge({ action, compact = false }) {
         background: visual.color,
         color: visual.textColor || "#111827",
         padding: compact ? "6px 9px" : "8px 11px",
-        fontSize: compact ? 11 : 12,
+        fontSize: compact ? 10.5 : 12,
+        maxWidth: compact ? 92 : undefined,
+        whiteSpace: compact ? "normal" : "nowrap",
+        lineHeight: compact ? 1.15 : 1.2,
+        justifyContent: "center",
+        textAlign: "center",
+        wordBreak: "normal",
+        overflowWrap: "anywhere",
         border: visual.label === "STAGGER ADD" ? "1px solid #22c55e" : "1px solid rgba(17,24,39,0.12)"
       }}
       title={visual.label}
     >
       {visual.label === "AGGRESSIVE ACCUMULATION" ? <span aria-hidden="true">★</span> : null}
-      <span>{visual.label}</span>
+      <span>{displayLabel}</span>
     </span>
   );
 }
 
 
 function resolvedActionParts(stock) {
+  if (stock?.decision_v35) {
+    const capital = stock.decision_v35.capitalDecision || {};
+    const existingMap = { HOLD_CORE: "HOLD CORE", HOLD_ADD_IN_PARTS: "HOLD / ADD IN PARTS", HOLD_REVIEW: "HOLD / REVIEW", TRIM_PROTECT: "TRIM / PROTECT" };
+    const freshMap = { STAGGER_ADD: "STAGGER ADD", PART_SIZED_ONLY: "PART-SIZED ONLY", NO_FRESH: "NO FRESH" };
+    const corePosture = existingMap[capital.existingPosition] || "HOLD CORE";
+    const freshCapital = freshMap[capital.freshTacticalCapital] || "NO FRESH";
+    return { corePosture, freshCapital, tacticalBucket: corePosture, decision: finalStockDecision(stock) };
+  }
   const decision = finalStockDecision(stock);
   const tactical = decision.tacticalAction || stock?.action || "WATCH CLOSELY";
   const tacticalBucket = normalizeActionLabel(tactical);
@@ -1200,23 +1282,20 @@ function resolvedActionParts(stock) {
   const pressure = String(stock?.current_pressure || "").toUpperCase();
   const correction = correctionModeValue(stock).toUpperCase();
   const highPressure = /HIGH|BREAK|VERY HIGH/.test(pressure) || /PRICE CORRECTION/.test(correction);
-  const trm = trmScoresForStock(stock);
-  const trmExpression = trm.expression ?? 50;
-  const trmPressure = trm.pressure ?? 50;
-  const trmSector = trm.sector ?? 50;
-  const trmHistorical = trm.historicalEcho ?? 50;
 
   let corePosture = "HOLD CORE";
   if (["EXIT STRENGTH", "HEAVY TRIM", "TRIM SATELLITE"].includes(tacticalBucket)) {
     corePosture = tacticalBucket;
+  } else if (tacticalBucket === "NO FRESH ENTRY" || tacticalBucket === "HOLD CORE / NO FRESH") {
+    corePosture = "HOLD CORE";
   } else if (tacticalBucket === "WATCH CLOSELY") {
-    corePosture = /NO MAJOR/.test(correction) && !highPressure ? "HOLD CORE" : "WATCH CLOSELY";
+    const explicitGate = /WAIT|GATE|WATCHLIST|WATCH CLOSELY|SUPPORTIVE BUT MUTED/i.test(String(tactical));
+    corePosture = explicitGate ? "WATCH CLOSELY" : (/NO MAJOR/.test(correction) && !highPressure ? "HOLD CORE" : "WATCH CLOSELY");
   } else if (["STAGGER ADD", "ACCUMULATE", "AGGRESSIVE ACCUMULATION"].includes(tacticalBucket)) {
     const lowDormancy = dormancy === "LOW";
     const leaderCoreText = /Core:\s*hold\/add|hold winner/i.test(decision.capitalPosture || "");
-    const activeLeader = leadership >= 75 && tacticalScore >= 8.0 && strategic >= 8.0 && lowDormancy && !highPressure && trmExpression >= 70 && trmPressure <= 55 && trmHistorical > 50;
-    const constructiveCore = leadership >= 65 && tacticalScore >= 6.8 && strategic >= 7.0 && lowDormancy && !highPressure;
-    corePosture = activeLeader ? "HOLD WINNER" : (constructiveCore || leaderCoreText ? "HOLD CONSTRUCTIVE CORE" : "HOLD CORE");
+    const activeLeader = leadership >= 70 && tacticalScore >= 7.0 && strategic >= 7.5 && lowDormancy && !highPressure;
+    corePosture = (activeLeader || leaderCoreText) ? "HOLD WINNER" : "HOLD CORE";
   } else if (tacticalBucket === "HOLD WINNER") {
     corePosture = "HOLD WINNER";
   } else if (tacticalBucket === "HOLD CORE") {
@@ -1226,15 +1305,11 @@ function resolvedActionParts(stock) {
   let freshCapital = tacticalBucket;
   if (corePosture === "HOLD WINNER" && tacticalBucket === "HOLD WINNER") freshCapital = "STAGGER ADD";
   if (corePosture === "HOLD CORE" && tacticalBucket === "HOLD CORE") freshCapital = "WATCH CLOSELY";
-  if (corePosture === "HOLD CONSTRUCTIVE CORE" && tacticalBucket === "HOLD CORE") freshCapital = "WATCH CLOSELY";
-  if ((trmSector < 45 || trmHistorical <= 50 || trmExpression < 70) && ["ACCUMULATE", "AGGRESSIVE ACCUMULATION"].includes(freshCapital)) {
-    freshCapital = "STAGGER ADD";
-  }
-  if (trmPressure >= 65 && ["STAGGER ADD", "ACCUMULATE", "AGGRESSIVE ACCUMULATION"].includes(freshCapital)) {
-    freshCapital = "WATCH CLOSELY";
-  }
+  if (["EXIT STRENGTH", "HEAVY TRIM", "TRIM SATELLITE"].includes(corePosture)) freshCapital = "NO FRESH";
+  if (/NO FRESH|BLOCK FRESH|AVOID FRESH|HOLD CORE \/ NO FRESH|PROTECT \/ OBSERVE/i.test(String(tactical))) freshCapital = "NO FRESH";
 
-  return { corePosture, freshCapital, tacticalBucket, decision };
+  // Action bucket describes the existing-position/tactical posture; fresh capital is separate.
+  return { corePosture, freshCapital, tacticalBucket: corePosture, decision };
 }
 
 function coreFreshTableText(stock) {
@@ -1247,12 +1322,11 @@ function ActionLegend() {
     ["EXIT STRENGTH", "hard-pressure capital protection", "Use strength to reduce when reset risk is active."],
     ["HEAVY TRIM", "20–35% drawdown likely", "Protect capital."],
     ["TRIM SATELLITE", "15–20% correction likely", "Reduce heat, keep exposure."],
-    ["WATCH CLOSELY", "8–15% pullback possible", "Monitor natal catalyst before adding."],
-    ["HOLD CORE", "Normal volatility", "Stay invested; do not chase fresh capital without catalyst support."],
-    ["HOLD CONSTRUCTIVE CORE", "Constructive core", "Hold existing exposure; add only if fresh-capital gate agrees."],
-    ["STAGGER ADD", "Early opportunity", "Begin deployment gradually; not an all-in signal."],
-    ["ACCUMULATE", "Strong opportunity", "Add meaningfully but still in planned tranches."],
-    ["AGGRESSIVE ACCUMULATION", "Rare high-conviction setup", "Highest-conviction deployment; use only when all gates agree."]
+    ["WATCH CLOSELY", "Mapped catalyst gate", "Hold core; add only after the specified astro gate absorbs."],
+    ["HOLD CORE", "Normal volatility / no fresh", "Stay invested if held; fresh capital is added only when the tactical line permits it."],
+    ["STAGGER ADD", "Early opportunity", "Begin deployment gradually."],
+    ["ACCUMULATE", "Strong opportunity", "Add meaningfully."],
+    ["AGGRESSIVE ACCUMULATION", "Rare high-conviction setup", "Deploy aggressively."]
   ];
 
   return (
@@ -1344,7 +1418,7 @@ function compactWindowText(item, horizonLabel) {
   const st = pressureExpansionState(item);
   const date = formatReplayWindowDate(item);
   const signal = languageSafeSignal(item);
-  let instruction = "wait for clearer separation";
+  let instruction = "use clearer astro separation";
   if (st.pressure >= 78 && st.expansion >= 70) instruction = "pressure first; avoid fresh chase";
   else if (st.pressureLead) instruction = "protect strength / avoid fresh chase";
   else if (st.expansionLead) instruction = "add gradually; do not chase vertical moves";
@@ -1429,7 +1503,7 @@ function pressureSeverityFromState(st = {}, source = {}) {
     return { key: "contamination", label: "CONTAMINATION PRESSURE", guidance: "support is usable but follow-through is unreliable; hold core and wait fresh" };
   }
   if (pressure >= 72 || (pressure >= 68 && pressureLead) || (hardText && pressure >= 65 && leadership < 65)) {
-    return { key: "high", label: "HIGH PRESSURE", guidance: "protect excess before fresh deployment; not a full exit unless pressure dominates" };
+    return { key: "high", label: "HIGH PRESSURE", guidance: "protect excess before fresh deployment; not a full-exit signal; treat it as excess-exposure control" };
   }
   if (pressure >= 58 || Math.abs(pressure - expansion) <= 8) {
     return { key: "medium", label: "MEDIUM PRESSURE", guidance: "digestion / sideways churn; hold core, protect excess" };
@@ -1518,7 +1592,7 @@ function languageSafeSignal(source = {}, context = {}) {
   if (cq.durableButPressured && st.highConflict) return "RALLY WITH CHURN — durable support under pressure";
 
   if (st.pressure >= 82 && st.pressureLead) return "BREAK-RISK WINDOW — protect capital";
-  if (st.pressure >= 78 && st.expansion < 70) return "PRESSURE FIRST — wait for repair";
+  if (st.pressure >= 78 && st.expansion < 70) return "PRESSURE FIRST — capital stays out until repair gate";
   if (st.pressureLead && st.pressure >= 68) return "TRIM SATELLITE — protect strength";
   if (st.pressureLead) return "AVOID FRESH CHASE — pressure active";
 
@@ -1535,7 +1609,7 @@ function languageSafeSignal(source = {}, context = {}) {
   if (st.expression.includes("bullish tug")) return "VOLATILE UPSIDE — stagger entry";
   if (st.expression.includes("institutional")) return "RALLY WITH CHURN — protect strength";
   if (st.expression.includes("compression")) return "PRESSURE FIRST — reassess later";
-  return "WATCH ONLY — no clean edge";
+  return "ASTRO GATE PENDING — no deployable edge";
 }
 
 function replayTacticalActionText(summary, tacticalWindow) {
@@ -1547,10 +1621,10 @@ function replayTacticalActionText(summary, tacticalWindow) {
   if (cq.earlyFinanceRerating) return `${signal}${date}. Early finance-sector support is active; use pressure as sizing/churn control, not as automatic protection.`;
   if (cq.repairWatch) return `${signal}${date}. Forward support may exist, but current natal contact quality asks for repair/watch before fresh capital.`;
   if (cq.pressureDominatesSupport) return `${signal}${date}. Hard natal pressure dominates the supportive contacts; protect first.`;
-  if (cq.unstableExpansion) return `${signal}${date}. Expansion is volatile/pressured; avoid fresh chase, but do not call it a break unless pressure dominates support.`;
+  if (cq.unstableExpansion) return `${signal}${date}. Expansion is volatile/pressured; avoid fresh chase; classify it as break-risk only when the break-risk label is explicit support.`;
   if (cq.contestedLeadership || cq.contestedMars) return `${signal}${date}. Support and pressure are both active; hold core and stagger only if sizing is disciplined.`;
   if (cq.durableButPressured || cq.financeReratingWithChurn) return `${signal}${date}. Sector-relevant support is present; treat pressure as churn/digestion, not automatic exit.`;
-  if (st.pressure >= 78 && st.expansion >= 70) return `PRESSURE FIRST — wait for repair${date}. High pressure and expansion conflict; avoid fresh chase.`;
+  if (st.pressure >= 78 && st.expansion >= 70) return `PRESSURE FIRST — capital stays out until repair gate${date}. High pressure and expansion conflict; avoid fresh chase.`;
   if (st.pressureLead) return `${signal}${date}. Pressure leads expansion; protect capital before adding.`;
   if (st.highConflict) return `${signal}${date}. Expansion exists, but movement should be choppy.`;
   if (st.expansionLead) return `${signal}${date}. Expansion leads pressure; deploy gradually, not vertically.`;
@@ -1563,15 +1637,15 @@ function replayStrategicActionText(summary, strategicWindow) {
   const cq = replayAstroContactQuality(source);
   const date = source?.date ? ` around ${formatDateReadable(source.date)}` : "";
   const score = replayScoreFromWindow(source, summary, "strategic") ?? 5;
-  if (cq.earlyFinanceRerating) return `EARLY FINANCE RERATING — stagger through churn${date}. First pressure windows are sizing control unless hard structural pressure dominates.`;
-  if (cq.repairWatch) return `REPAIR WATCH — future support visible, but current natal contact quality is not deployable yet${date}.`;
+  if (cq.earlyFinanceRerating) return `EARLY FINANCE RERATING — stagger through churn${date}. First pressure windows are sizing control; hard structural pressure receives a separate protection label.`;
+  if (cq.repairWatch) return `REPAIR GATE — future support exists, but current natal contact quality is not deployable yet${date}.`;
   if (cq.financeReratingWithChurn || cq.contestedLeadership) return `RALLY WITH CHURN — sector-relevant support is present; use pressure as sizing control${date}.`;
   if (st.pressure >= 78 && st.expansion >= 70) return `PRESSURE FIRST — reassess${date || " after repair"}. Strategic window is conflicted, not a clean deployment window.`;
   if (score >= 8.5 && st.expansion >= st.pressure) return `STRONG FORWARD LEADER — mapped window${date}. Add on pressure, not chase.`;
   if (score >= 7 && st.expansion >= st.pressure) return `DEFERRED LEADER — mapped window${date}. Better capital window later.`;
   if (st.pressureLead || st.pressure >= 68) return `PRESSURE AHEAD — protect before mapped window${date}.`;
-  if (score <= 5.5) return `WATCHLIST ONLY — not deployable yet${date}.`;
-  return `MATURE / SELECTIVE — hold core, wait for cleaner window${date}.`;
+  if (score <= 5.5) return `ASTRO GATE PENDING — not deployable yet${date}.`;
+  return `MATURE / SELECTIVE — hold core, use cleaner mapped window${date}.`;
 }
 
 function replayFutureWindowText(item, label = "Opportunity window") {
@@ -1584,7 +1658,7 @@ function replayFutureWindowText(item, label = "Opportunity window") {
   if (st.pressure >= 75 && st.expansion >= 70 && sev.key !== "churn") return `${label}: PRESSURE-FIRST WINDOW around ${date} — high expansion but high pressure; treat as risky, not automatically “best”.`;
   if (st.pressureLead) return `${label}: CAUTION WINDOW around ${date} — pressure leads expansion; protect strength.`;
   if (st.expansionLead) return `${label}: ADD / RERATING WINDOW around ${date} — ${signal}.`;
-  return `${label}: MIXED WINDOW around ${date} — wait for clearer separation.`;
+  return `${label}: MIXED WINDOW around ${date} — use clearer astro separation.`;
 }
 
 function replayPressureWindowText(item) {
@@ -1595,7 +1669,7 @@ function replayPressureWindowText(item) {
   if (sev.key === "break") return `BREAK PRESSURE around ${date} — capital-protection window; avoid fresh chase until reset risk clears.`;
   if (sev.key === "churn") return `CHURN PRESSURE around ${date} — sizing/digestion window; stagger, do not treat as an automatic exit.`;
   if (sev.key === "contamination") return `CONTAMINATION PRESSURE around ${date} — support is usable but follow-through is unreliable; hold core and wait fresh.`;
-  if (sev.key === "high") return `HIGH PRESSURE around ${date} — protect excess before fresh deployment; not a full exit unless pressure dominates.`;
+  if (sev.key === "high") return `HIGH PRESSURE around ${date} — protect excess before fresh deployment; not a full-exit signal; treat it as excess-exposure control.`;
   if (sev.key === "medium") return `MEDIUM PRESSURE around ${date} — digestion / sideways churn; hold core, protect excess.`;
   return `LOW PRESSURE around ${date} — tactical noise; not an exit signal by itself.`;
 }
@@ -1618,7 +1692,7 @@ function replayWindowMapText(item, emptyText) {
   if (item.windowType === "dormancy") {
     const start = item.date ? formatDateReadable(item.date) : "now";
     const end = item.endDate ? formatDateReadable(item.endDate) : "mapped catalyst";
-    return `${role}: ${start} to ${end} — capital may be early; wait for accumulation/expansion to open.`;
+    return `${role}: ${start} to ${end} — capital may be early; use the mapped accumulation/expansion opening.`;
   }
   const when = date ? formatDateReadable(date) : "date not mapped";
   if (item.windowType === "current") {
@@ -1626,7 +1700,7 @@ function replayWindowMapText(item, emptyText) {
   }
   if (item.windowType === "accumulation" || item.windowType === "strategic_accumulation") {
     const offset = numericValue(item.offsetDays);
-    if (/REPAIR WATCH|FUTURE SUPPORT|WATCH ONLY|no clean edge|PRESSURE FIRST|AVOID FRESH CHASE|UNSTABLE EXPANSION/i.test(signal)) {
+    if (/REPAIR GATE|FUTURE SUPPORT|ASTRO GATE PENDING|WATCH ONLY|no clean edge|PRESSURE FIRST|AVOID FRESH CHASE|UNSTABLE EXPANSION/i.test(signal)) {
       if (offset === 0) {
         return `${role}: no clean accumulation window mapped yet; replay date is only a review condition.`;
       }
@@ -1837,18 +1911,18 @@ function replayDormancyText(summary, tacticalWindow, strategicWindow, bestWindow
   }
 
   if (oppOffset !== null && oppOffset > 90 && tacticalScore < 6) {
-    return `DORMANT CAPITAL RISK — capital may sleep from ${formatDateReadable(replayIso)} to ${formatDateReadable(oppIso)}; wait for that mapped catalyst.`;
+    return `DORMANT CAPITAL RISK — capital may sleep from ${formatDateReadable(replayIso)} to ${formatDateReadable(oppIso)}; use that mapped catalyst gate.`;
   }
 
   if (oppOffset !== null && oppOffset > 45 && tacticalScore < 6.5) {
-    return `MODERATE DORMANCY — wait through ${replayMonthRange(replayIso, oppIso)} unless the astro window activates earlier.`;
+    return `MODERATE DORMANCY — wait through ${replayMonthRange(replayIso, oppIso)}; use the mapped astro window as the next activation check.`;
   }
 
   if (strategicScore < 5.5 && tacticalScore < 5.8) {
     return "CAPITAL INEFFICIENT — weak tactical and strategic score inside this replay horizon.";
   }
 
-  return "LOW — timing is usable if the action label remains constructive.";
+  return "LOW — timing is usable under the current action label.";
 }
 
 function reconcileReplayScoresAndActions(resolved) {
@@ -1858,14 +1932,14 @@ function reconcileReplayScoresAndActions(resolved) {
   let strategicAction = resolved.strategicAction;
   let mainLabel = resolved.mainLabel;
 
-  if (/WATCH ONLY|no clean edge/i.test(tacticalAction) && tacticalScore >= 6.2) {
+  if (/ASTRO GATE PENDING|ASTRO GATE PENDING|WATCH ONLY|no clean edge/i.test(tacticalAction) && tacticalScore >= 6.2) {
     tacticalAction = `STAGGER ADD — active window forming; deploy gradually, not vertically.`;
   }
-  if (/WATCH ONLY|no clean edge/i.test(tacticalAction) && tacticalScore < 6.2) {
-    tacticalAction = `WATCH CLOSELY — pressure/repair first; wait for supportive natal contact before fresh capital.`;
+  if (/ASTRO GATE PENDING|ASTRO GATE PENDING|WATCH ONLY|no clean edge/i.test(tacticalAction) && tacticalScore < 6.2) {
+    tacticalAction = `ASTRO GATE PENDING — pressure/repair first; fresh capital waits until the next supportive natal contact is mapped.`;
   }
   if (/STAGGER ADD|ACCUMULATE|RERATING|LEADER/i.test(tacticalAction) && tacticalScore < 5.8) {
-    tacticalAction = `WATCH CLOSELY — tactical idea exists, but score remains selective (${tacticalScore.toFixed(1)}/10).`;
+    tacticalAction = `ASTRO GATE PENDING — tactical idea exists, but score remains selective (${tacticalScore.toFixed(1)}/10).`;
   }
   if (/STRONG LEADER|FORWARD LEADER|PRIORITY/i.test(strategicAction) && strategicScore < 6.5) {
     strategicAction = `RALLY WITH CHURN — participate selectively; strategic score is not yet leader-grade.`;
@@ -1873,7 +1947,7 @@ function reconcileReplayScoresAndActions(resolved) {
   if (/WATCHLIST ONLY|MATURE \/ SELECTIVE/i.test(strategicAction) && strategicScore >= 6.8) {
     strategicAction = `CONTROLLED FORWARD LEADER — durability is visible; add only through pressure absorption / supportive natal contacts.`;
   }
-  if (/WATCH ONLY|no clean edge/i.test(mainLabel) && /STAGGER ADD|RALLY WITH CHURN|RERATING|LEADER/i.test(`${tacticalAction} ${strategicAction}`)) {
+  if (/ASTRO GATE PENDING|ASTRO GATE PENDING|WATCH ONLY|no clean edge/i.test(mainLabel) && /STAGGER ADD|RALLY WITH CHURN|RERATING|LEADER/i.test(`${tacticalAction} ${strategicAction}`)) {
     mainLabel = tacticalAction.replace(/\.$/, "");
   }
 
@@ -1922,8 +1996,8 @@ function resolveReplayConflict(summary, macro, tacticalWindow, strategicWindow, 
     const currentQuality = replayAstroContactQuality(summary || {});
     const currentSignal = languageSafeSignal(summary || {});
     if (currentQuality.repairWatch) {
-      mainLabel = `REPAIR WATCH — future support visible, current natal contacts need repair`;
-      tacticalAction = `WATCH CLOSELY — current leadership is weak; wait for a cleaner supportive natal contact.`;
+      mainLabel = `REPAIR GATE — future support exists, current natal contacts need repair`;
+      tacticalAction = `ASTRO GATE PENDING — current leadership is weak; use the next mapped supportive natal contact.`;
       strategicAction = `FUTURE SUPPORT VISIBLE — do not convert long-range durability into current rerating.`;
       currentStory = "Forward support is visible, but current natal contact quality is not deployable yet.";
       capitalPosture = "Hold only disciplined core; fresh capital waits for the next clean astro window.";
@@ -1949,8 +2023,8 @@ function resolveReplayConflict(summary, macro, tacticalWindow, strategicWindow, 
       capitalPosture = "Participate gradually; do not turn later pressure into a no-entry signal now.";
     }
   } else if (pressureBeforeOpportunity && pressureIso) {
-    mainLabel = `PRESSURE FIRST — wait for cleaner window near ${opportunityIso ? formatDateReadable(opportunityIso) : "mapped opportunity"}`;
-    tacticalAction = `WATCH CLOSELY — pressure window ${formatDateReadable(pressureIso)} comes before the opportunity.`;
+    mainLabel = `PRESSURE FIRST — use cleaner mapped window near ${opportunityIso ? formatDateReadable(opportunityIso) : "mapped opportunity"}`;
+    tacticalAction = `ASTRO GATE PENDING — pressure window ${formatDateReadable(pressureIso)} comes before the opportunity.`;
     strategicAction = opportunityIso ? `CONTROLLED FORWARD LEADER — reassess near ${formatDateReadable(opportunityIso)} after pressure absorption.` : strategicAction;
     currentStory = `Pressure precedes opportunity: protect through ${formatDateReadable(pressureIso)}, then reassess the mapped opportunity.`;
     capitalPosture = "Wait for pressure to pass; do not deploy simply because a later expansion contact exists.";
@@ -1959,7 +2033,7 @@ function resolveReplayConflict(summary, macro, tacticalWindow, strategicWindow, 
     tacticalAction = replayTacticalActionText(summary, tacticalWindow || summary);
     strategicAction = `HIGH-POTENTIAL BUT RISKY — protect strength near ${opportunityIso ? formatDateReadable(opportunityIso) : "future window"}.`;
     currentStory = "Future expansion appears under hostile pressure; treat it as conflict or blow-off risk, not a clean best window.";
-    capitalPosture = "Use strength carefully; wait for cleaner macro/stock-specific alignment before fresh strategic deployment.";
+    capitalPosture = "Use strength carefully; use the next cleaner macro/stock-specific astro alignment before fresh strategic deployment.";
   }
 
   const rawResolved = {
@@ -2155,7 +2229,7 @@ function replayPathPhrase(source, pressureIso, scope = "week") {
   if (/HIGH-VOLTAGE|VERTICAL|HIGH-ENERGY/i.test(signal)) return `${dateText}Vertical/volatile expansion possible; hold core, trim only excess.`;
   if (/RALLY WITH CHURN|VOLATILE UPSIDE/i.test(signal)) return `${dateText}Rally with churn; participate carefully and protect later strength.`;
   if (/STAGGER ADD|BUILDING RERATING|STRONG LEADER/i.test(signal)) return `${dateText}${signal}; deploy gradually, not vertically.`;
-  if (/PRESSURE FIRST|TRIM|AVOID|WATCH ONLY/i.test(signal) || st.pressureLead) return `${dateText}${signal}; wait for pressure absorption before fresh capital.`;
+  if (/PRESSURE FIRST|TRIM|AVOID|WATCH ONLY/i.test(signal) || st.pressureLead) return `${dateText}${signal}; use the pressure-absorption gate before fresh capital.`;
   return `${dateText}${signal}; keep sizing disciplined.`;
 }
 
@@ -2173,10 +2247,10 @@ function buildReplayTacticalPathRows(resolved, summary, pressureWindow) {
     return [
       ["Week 1", formatDatesInText(`Replay date: pressure/repair first. Core can be held selectively; fresh capital waits for the next supportive natal contact${pressureIso ? ` after ${formatDateReadable(pressureIso)}` : ""}.`)],
       ["Week 2", "Catalyst absorption week: do not call this ‘no opportunity’; call it pressure-before-forward-leadership."],
-      ["Week 3", "Watch for the first usable expansion contact; stagger only if pressure stops dominating the natal chart."],
+      ["Week 3", "Watch for the first usable expansion contact; no stagger instruction until pressure stops dominating the natal chart."],
       ["Week 4", "Forward leadership scan: strong durability is visible, but current tactical leadership must lift before fresh deployment."],
       ["Week 5", "Capital posture: hold core / wait fresh; avoid fresh chase when hard Saturn/eclipse/Mars contacts contaminate expansion."],
-      ["Week 6", "Upgrade only if the dated astro field shifts from pressure absorption to clean expansion support."]
+      ["Week 6", "Upgrade requires a separately dated clean-expansion support gate."]
     ];
   }
   return [1, 2, 3, 4, 5, 6].map(week => {
@@ -2229,13 +2303,22 @@ function ReplayDecisionTable({ summary, macro, tacticalWindow, strategicWindow, 
   const tacticalPathRows = buildReplayTacticalPathRows(resolved, summary, effectivePressure);
   const strategicPathRows = buildReplayStrategicPathRows(resolved, summary, strategicWindow, effectiveOpportunity, effectivePressure);
   const replayParts = replayResolvedActionParts(resolved, summary);
+  const researchReading = validationIntelligence?.currentResearchReading || null;
+  const researchHorizon = researchReading?.capitalHorizon || {};
+  const promotedTactical = researchHorizon?.tactical?.verdict || researchReading?.tacticalState || resolved.tacticalAction;
+  const promotedStrategic = researchHorizon?.strategic?.verdict || researchReading?.strategicState || resolved.strategicAction;
+  const promotedPassive = researchHorizon?.passiveLongTerm?.verdict || null;
+  const promotedMainLabel = researchReading
+    ? `${researchReading.strategicState || "RESEARCH-PROMOTED STORY"} — ${researchReading.direction || "UNRESOLVED"} / ${researchReading.pressure || "pressure unresolved"}`
+    : resolved.mainLabel;
   const rows = [
     ["Registry", replayRegistryLine(summary)],
-    ["Main label", resolved.mainLabel],
+    ["Main label", promotedMainLabel],
     ["Core posture", replayParts.corePosture],
     ["Fresh capital action", replayParts.freshCapital],
-    ["Tactical 30–45d", resolved.tacticalAction],
-    ["Strategic 3–12m", resolved.strategicAction],
+    ["Tactical 30–45d", promotedTactical],
+    ["Strategic 3–12m", promotedStrategic],
+    ...(promotedPassive ? [["Passive long-term", promotedPassive]] : []),
     ...replayWindowMapRows(summary),
     ["Main pressure window", replayPressureWindowText(effectivePressure)],
     ["Tactical score /10", formatScore(resolved.tacticalScore)],
@@ -2637,7 +2720,7 @@ function ReplayLab({ input, setInput, result, error, loading, onRun, researchVie
 
           {narrative ? (
             <div style={{ ...decisionCardStyle, borderColor: "#5eead4", background: "#f0fdfa" }}>
-              <div style={miniLabelStyle}>v33.1 Narrative Synthesis</div>
+              <div style={miniLabelStyle}>v33 Narrative Synthesis</div>
               <div style={{ marginTop: 6, fontWeight: 800 }}>{narrative.currentState}</div>
               <div style={{ marginTop: 8 }}>{narrative.singleStory}</div>
               <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8 }}>
@@ -2646,7 +2729,7 @@ function ReplayLab({ input, setInput, result, error, loading, onRun, researchVie
                   <div style={{ fontWeight: 800 }}>{narrative.capitalAction?.tactical?.action || "—"}</div>
                 </div>
                 <div style={detailMetricStyle}>
-                  <div style={miniLabelStyle}>Strategic 3–12m</div>
+                  <div style={miniLabelStyle}>Strategic 3–24m</div>
                   <div style={{ fontWeight: 800 }}>{narrative.capitalAction?.strategic?.action || "—"}</div>
                 </div>
                 <div style={detailMetricStyle}>
@@ -2657,7 +2740,7 @@ function ReplayLab({ input, setInput, result, error, loading, onRun, researchVie
               <div style={{ ...smallMutedStyle, marginTop: 8 }}>
                 Confidence: {narrative.confidence?.label || "—"} ({narrative.confidence?.score ?? "—"}/100)
                 {narrative.protectionDate ? ` · Protection/review: ${formatDateReadable(narrative.protectionDate)}` : ""}
-                {narrative.accelerationDate ? ` · Acceleration watch: ${formatDateReadable(narrative.accelerationDate)}` : ""}
+                {narrative.accelerationDate ? ` · Future gate: ${formatDateReadable(narrative.accelerationDate)}` : ""}
               </div>
               {Array.isArray(narrative.why) && narrative.why.length ? (
                 <ul style={{ marginTop: 8, marginBottom: 0 }}>
@@ -2667,8 +2750,6 @@ function ReplayLab({ input, setInput, result, error, loading, onRun, researchVie
             </div>
           ) : null}
 
-          <HistoricalTransitEvidencePanel evidence={result?.historicalTransitEvidence} />
-          <EpisodeInteractionDisplayPanel episode={result?.episodeInteractionDisplay} />
           <ReplayValidationComparisonPanel intelligence={result?.replayValidationIntelligence} />
 
           {replayMode === "DETAILED" ? (
@@ -2854,7 +2935,7 @@ function actionExplanation(stock) {
   const type = stock?.structural_cycle || "this stock";
 
   if (action.includes("ACCUMULATE")) {
-    return `Action is constructive because ${type} has a deployable leadership/catalyst mix. Still deploy in stages; the test is whether leadership confirms through the mapped window.`;
+    return `Action is constructive because ${type} has a deployable leadership/catalyst mix. Deploy in stages; the mapped window is the active leadership test.`;
   }
 
   if (action.includes("STAGGER")) {
@@ -2869,11 +2950,11 @@ function actionExplanation(stock) {
     if (leadership < 62 || strategic < 6.8 || dormancy !== "LOW") {
       return `This is a watch/repair setup, not a clean rerating. ${sev.label} means churn or delay; leadership is only ${Math.round(leadership)}/100 and dormancy is ${dormancy.toLowerCase()}.`;
     }
-    return `${sev.label} is manageable. Hold core or stagger only if the catalyst turns supportive; do not treat normal churn as a strategic break.`;
+    return `${sev.label} is manageable. Hold core or stagger according to the current action label; normal churn is not a strategic break.`;
   }
 
   if (readiness.includes("near") && leadership >= 60) {
-    return "The catalyst is close and leadership is reasonable, but the system wants confirmation from natal response quality before upgrading.";
+    return "The catalyst is close and leadership is reasonable; the current label remains in force until the next dated astro gate.";
   }
 
   return "No decisive stock-specific action edge yet. Continue observing upcoming catalysts, natal contacts, and sector/personality response.";
@@ -2951,7 +3032,7 @@ function NatalEditor({ stock, form, setForm, onSave, message }) {
         <label>Audit status<select disabled={locked} style={inputStyle} value={form.auditStatus || "manual-entry"} onChange={e => update("auditStatus", e.target.value)}><option value="verified">verified</option><option value="provisional">provisional</option><option value="ambiguous">ambiguous</option><option value="restructured-entity">restructured entity</option><option value="manual-entry">manual entry</option></select></label>
         <label>Source / note<input disabled={locked} style={inputStyle} value={form.source || ""} onChange={e => update("source", e.target.value)} /></label>
       </div>
-      <div style={smallMutedStyle}>Resolved chart preview: {form.birthDate || "date required"} · {form.birthTime || "time required"} · {form.city || "place required"} · {form.chartType || "chart type required"}</div>
+      <div style={smallMutedStyle}>Resolved chart preview: {normalizeUiDate(form.birthDate) || "date required"} · {form.birthTime || "time required"} · {form.city || "place required"} · {form.chartType || "chart type required"}</div>
 
       {message ? <div style={smallMutedStyle}>{message}</div> : null}
     </div>
@@ -3075,6 +3156,59 @@ function dormancyRiskText(stock, { full = false } = {}) {
   return explanations[risk] || risk;
 }
 
+function dormancyMapText(stock) {
+  if (!stock?.computed_from_natal) return "Natal data pending — dormancy cannot be mapped.";
+  const risk = capitalDormancyRiskValue(stock);
+  const catalyst = stock?.catalyst_label || stock?.next_event || "current catalyst";
+  const catalystTiming = readableEventTiming({
+    date: stock?.catalyst_date,
+    days: stock?.days_to_event ?? stock?.next_ignition,
+    phase: stock?.catalyst_readiness || stock?.current_window || "Prepare",
+    includeShadow: /eclipse|rahu|ketu|shadow/i.test([stock?.catalyst_label, stock?.environment_signature, stock?.current_window].join(" "))
+  });
+  const best = bestWindowText(stock);
+  if (risk === "LOW") {
+    return formatDatesInText(`Now: capital can work with staggered sizing. Near gate: ${catalyst} — ${catalystTiming}; absorb normal churn. Scale-up gate: ${best}; use only if support remains stronger than pressure.`);
+  }
+  if (risk === "MODERATE") {
+    return formatDatesInText(`Now: capital can work only selectively. Near gate: ${catalyst} — ${catalystTiming}; wait for pressure absorption before adding. Review gate: ${best}.`);
+  }
+  if (risk === "HIGH" || risk === "VERY HIGH") {
+    return formatDatesInText(`Now: fresh capital is inefficient. Near gate: ${catalyst} — ${catalystTiming}; use for review/protection, not deployment. Re-entry gate: ${best}.`);
+  }
+  return "Dormancy not assessed.";
+}
+
+function coreFreshSplitText(stock, tacticalDisplay, strategicDisplay, passiveVerdict) {
+  const tacticalBucket = normalizeActionLabel(tacticalDisplay || stock?.action || "WATCH CLOSELY");
+  const leadership = Number(stock?.leadership_probability ?? stock?.expansion_score ?? 0);
+  const tacticalScore = tacticalScoreValue(stock) ?? 0;
+  const strategicScore = strategicScoreValue(stock) ?? 0;
+  const lowDormancy = capitalDormancyRiskValue(stock) === "LOW";
+  const correction = correctionModeValue(stock).toUpperCase();
+  const highPressure = /HIGH|BREAK|VERY HIGH|PRICE CORRECTION/.test(`${stock?.current_pressure || ""} ${correction}`);
+  let corePosture = "HOLD CORE";
+  if (["EXIT STRENGTH", "HEAVY TRIM", "TRIM SATELLITE"].includes(tacticalBucket)) corePosture = tacticalBucket;
+  else if (tacticalBucket === "WATCH CLOSELY") corePosture = "WATCH CLOSELY";
+  else if (["STAGGER ADD", "ACCUMULATE", "AGGRESSIVE ACCUMULATION"].includes(tacticalBucket)) {
+    corePosture = leadership >= 70 && tacticalScore >= 7 && strategicScore >= 7.5 && lowDormancy && !highPressure ? "HOLD WINNER" : "HOLD CORE";
+  }
+  const freshCapital = /NO FRESH|AVOID FRESH|BLOCK FRESH|PROTECT \/ OBSERVE|TRIM|HEAVY|EXIT/i.test(String(tacticalDisplay || ""))
+    ? "NO FRESH"
+    : (["STAGGER ADD", "ACCUMULATE", "AGGRESSIVE ACCUMULATION"].includes(tacticalBucket) ? tacticalBucket : "WATCH CLOSELY");
+  const existing = corePosture === "HOLD WINNER"
+    ? "existing/core: hold winner"
+    : corePosture === "HOLD CORE"
+      ? "existing/core: hold core"
+      : `existing/core: ${corePosture.toLowerCase()}`;
+  const fresh = freshCapital === "NO FRESH"
+    ? "fresh capital: no fresh entry"
+    : `fresh capital: ${String(freshCapital || "watch gate").toLowerCase()}`;
+  const strategic = `strategic: ${strategicActionCompact(strategicDisplay, stock).toLowerCase()}`;
+  const passive = `passive: ${String(passiveVerdict || "not resolved").replace(/_/g, " ").toLowerCase()}`;
+  return `Capital split — ${existing}; ${fresh}; ${strategic}; ${passive}.`;
+}
+
 function dormancyTone(value) {
   const v = String(value || "").toUpperCase();
   if (v.includes("VERY") || v === "HIGH") return "pressure";
@@ -3157,7 +3291,7 @@ function pathRecommendationFromAction(action, { catalyst = "mapped catalyst", ti
   if (/TRIM SATELLITE/i.test(text)) {
     return `Trim satellite exposure into ${anchor}; keep only disciplined core risk.`;
   }
-  if (/PRESSURE FIRST|AVOID|WATCH ONLY|WATCH CLOSELY/i.test(text)) {
+  if (/PRESSURE FIRST|AVOID|ASTRO GATE PENDING|WATCH ONLY|WATCH CLOSELY/i.test(text)) {
     return `Astro pressure remains the mapped priority around ${anchor}; fresh capital waits for supportive natal timing.`;
   }
   if (/HOLD WINNER|HIGH-VOLTAGE|VERTICAL/i.test(text)) {
@@ -3191,7 +3325,7 @@ function stockClusterOverlapContext(stock) {
   const sev = pressureRoutingState(stock).severity;
   const behaviour =
     sev.key === "high" || sev.key === "break"
-      ? "expect pressure-first behaviour: protect excess/capital and wait for repair confirmation"
+      ? "expect pressure-first behaviour: protect excess/capital and use the mapped repair gate confirmation"
       : sev.key === "medium"
         ? "expect churn, delay, and confirmation tests rather than clean vertical expansion"
         : "expect tactical noise; use supporting natal contacts before upgrading";
@@ -3208,7 +3342,21 @@ function stockClusterOverlapContext(stock) {
 
 
 function buildTacticalPathRows(stock) {
-  const decision = finalStockDecision(stock);
+  if (stock?.decision_v35) {
+    const v35 = stock.decision_v35;
+    const capital = v35.language?.capital || {};
+    const gate = v35.timingPath?.tacticalGate || v35.timingPath?.nextGate;
+    const rows = [["Now", `Existing position: ${capital.existingPosition}. Fresh tactical capital: ${capital.freshTacticalCapital}.`]];
+    if (gate) rows.push([formatDateReadable(gate.date), v35GateSummary(gate)]);
+    const shared = gate?.capitalBucket === "FRESH_TACTICAL_AND_STRATEGIC";
+    rows.push(["After tactical gate", gate
+      ? shared
+        ? "This is a shared re-entry gate. Rerun the tactical and strategic buckets together before reopening either one."
+        : "Rerun the tactical buckets only. Do not use this gate to suspend or revoke the strategic decision."
+      : "No later tactical gate is mapped; keep the present tactical decision primary."]);
+    return rows;
+  }
+  const tactical = v347TacticalDecision(stock);
   const catalyst = stock?.catalyst_label || stock?.next_event || "mapped catalyst";
   const timing = readableEventTiming({
     date: stock?.catalyst_date,
@@ -3217,86 +3365,172 @@ function buildTacticalPathRows(stock) {
     includeShadow: /eclipse|rahu|ketu|shadow/i.test([catalyst, stock?.environment_signature, stock?.current_window].join(" "))
   });
   const baseIso = stockPathBaseIso(stock);
-  const actionText = `${decision.mainLabel} ${decision.tacticalAction} ${decision.strategicAction}`;
-  const pressureMode = /HIGH PRESSURE|BREAK PRESSURE|PRESSURE FIRST|TRIM SATELLITE|HEAVY TRIM/i.test(actionText);
-  const leaderMode = /STRONG FORWARD LEADER|HOLD WINNER|BUILDING RERATING|Near-window rerating/i.test(actionText) && !pressureMode;
-  const watchMode = !pressureMode && !leaderMode;
+  const m = stock?.computed_from_natal ? v347AstroMetrics(stock) : null;
+  const window = m?.windowText || bestWindowText(stock);
 
-  const phrases = pressureMode
-    ? [
-        `Pressure build-up into ${catalyst} — ${timing}. Protect satellite/excess exposure before the pressure peak.`,
-        `Pressure peak / absorption week around ${catalyst}. Keep fresh capital out until the natal pressure contact starts clearing.`,
-        `Post-pressure volatility check. Do not upgrade until the next supportive natal contact or repair window appears.`,
-        `Repair scan: only core survives; fresh capital remains selective unless pressure score falls and leadership improves.`,
-        `Fresh accumulation remains gated by the next supportive astro window, not by hope after the trim signal.`,
-        `Tactical reset checkpoint: pressure-first posture relaxes only if a new expansion contact becomes dominant.`
-      ]
-    : leaderMode
-      ? [
-          `Leadership window active into ${catalyst} — ${timing}. Hold winner / stagger fresh capital; do not deploy vertically.`,
-          `Catalyst absorption week: tolerate normal/medium churn while natal leadership remains above threshold.`,
-          `Post-catalyst noise window: trim only blow-off excess, not normal volatility.`,
-          `Leadership continuation check: keep core if expansion contacts remain stronger than pressure contacts.`,
-          `Add only around fresh supportive astro windows; avoid chasing if the window has already run vertically.`,
-          `Tactical durability checkpoint: hold winner while dormancy stays low and no high/break pressure appears.`
-        ]
-      : [
-          `Watch/repair setup into ${catalyst} — ${timing}. Fresh capital waits for supportive natal contact, not technical confirmation.`,
-          `Catalyst absorption week: expect churn/delay; only small pilot sizing if leadership improves astrologically.`,
-          `Post-catalyst review: do not upgrade to rerating unless expansion contacts dominate pressure contacts.`,
-          `Repair scan: keep this on watchlist capital; avoid turning moderate cycle potential into deployment.`,
-          `Dormancy control: capital can stay idle unless the next natal support window arrives.`,
-          `Tactical checkpoint: upgrade only when leadership score and astro contact quality both improve.`
-        ];
+  let phrases;
+  if (tactical.kind === "break-protect") {
+    phrases = [
+      `Hard pressure build-up into ${catalyst} — ${timing}. Fresh capital stays out; protect capital first.`,
+      `Pressure peak / absorption week around ${catalyst}. Maintain protection posture; no deployment instruction.`,
+      `Post-pressure reset scan. Do not rebuild until a separate expansion review is mapped.`,
+      `Core test week: only resilient core exposure remains; no fresh capital.`,
+      `Repair scan: wait for a constructive astro contact before restoring risk.`,
+      `Tactical checkpoint: protection posture relaxes only when break-pressure is no longer mapped.`
+    ];
+  } else if (tactical.kind === "pressure-watch") {
+    phrases = [
+      `Pressure window into ${catalyst} — ${timing}. No fresh capital; protect only excess/satellite exposure.`,
+      `Pressure absorption week. Hold core only if conviction remains; do not convert pressure into fresh deployment.`,
+      `Noise/reversal week: normal core volatility is not an automatic exit.`,
+      `Repair watch: wait for the next expansion review before adding.`,
+      `Capital discipline week: fresh capital remains blocked; next change requires an explicit expansion review.`,
+      `Tactical checkpoint: continue no-fresh posture until a real expansion review appears.`
+    ];
+  } else if (tactical.kind === "strong-active" || tactical.kind === "active") {
+    phrases = [
+      `Leadership window active into ${catalyst} — ${timing}. Stagger fresh capital; do not deploy vertically.`,
+      `Catalyst absorption week: tolerate normal astro churn while leadership remains the dominant field.`,
+      `Post-catalyst noise window: protect only blow-off excess, not normal volatility.`,
+      `Leadership continuation check: keep participation part-sized through the pressure window.`,
+      `Sizing checkpoint: add only within the active astro posture; avoid late vertical chase.`,
+      `Tactical durability checkpoint: continue while dormancy stays low and no break-risk pressure appears.`
+    ];
+  } else if (tactical.kind === "future-review" || tactical.kind === "watch") {
+    phrases = [
+      `Watch posture into ${catalyst} — ${timing}. Fresh capital is not asked to work meaningfully now.`,
+      `Capital discipline week: maintain watch/no-fresh posture through the current pressure or churn.`,
+      `Review preparation: next useful capital review is ${window}.`,
+      `Dormancy control: avoid early deployment before the review date.`,
+      `Selective observation: capital waits for the astro field to become deployable.`,
+      `Tactical checkpoint: reassess at the next review; no deployment signal is active today.`
+    ];
+  } else {
+    phrases = [
+      `Hold-through week into ${catalyst} — ${timing}. Normal astro churn is not an exit signal.`,
+      `Maintain disciplined sizing; no aggressive fresh capital.`,
+      `Observe pressure and dormancy without forcing a trade.`,
+      `Keep capital selective until a clearer expansion or protection review appears.`,
+      `No-change week: current posture remains selective.`,
+      `Tactical checkpoint: review the next mapped astro date before changing capital.`
+    ];
+  }
 
   return phrases.map((text, index) => [weekRangeLabel(index, baseIso), formatDatesInText(text)]);
 }
 
 function buildStrategicPathRows(stock) {
-  const decision = finalStockDecision(stock);
+  if (stock?.decision_v35) {
+    const v35 = stock.decision_v35;
+    const capital = v35.language?.capital || {};
+    const gate = v35.timingPath?.strategicGate || null;
+    const tacticalGate = v35.timingPath?.tacticalGate || v35.timingPath?.nextGate || null;
+    const fullBuild = v35.capitalDecision?.strategicCapital === "FULL_BUILD";
+    const rows = [["Now", `Strategic capital: ${capital.strategicCapital}. Passive long-term: ${capital.passiveLongTermCapital}. ${v35.language?.strategicNote || ""}`]];
+    if (tacticalGate && fullBuild) rows.push([`Tactical context · ${formatDateReadable(tacticalGate.date)}`, `${v35GateRoleLabel(tacticalGate.role)} affects tactical capital only. Continue FULL BUILD through this tactical-only window; it is not a strategic reassessment date.`]);
+    if (gate) rows.push([formatDateReadable(gate.date), v35GateSummary(gate)]);
+    const shared = gate?.capitalBucket === "FRESH_TACTICAL_AND_STRATEGIC";
+    rows.push(["Strategic continuity", gate
+      ? shared
+        ? "Rerun the tactical and strategic buckets together at this shared re-entry gate."
+        : "Rerun the strategic bucket at this strategic gate. Tactical gates before it do not change strategic capital."
+      : fullBuild
+        ? "FULL BUILD remains active. Only a mapped strategic protection/break gate can change it."
+        : "No later strategic decision gate is mapped; keep the present strategic decision primary."]);
+    return rows;
+  }
+  const strategic = v347StrategicDecision(stock);
+  const tactical = v347TacticalDecision(stock);
   const baseIso = stockPathBaseIso(stock);
-  const accumulation = accumulationReviewWindowText(stock);
-  const growth = reratingGrowthWindowText(stock);
   const pressure = pressureWindowText(stock);
-  const bestIso = extractFirstIsoDate(accumulation);
-  const pressureIso = extractFirstIsoDate(pressure) || stock?.catalyst_date || isoFromDaysAhead(stock?.days_to_event ?? stock?.next_ignition, baseIso);
-  const actionText = `${decision.mainLabel} ${decision.tacticalAction} ${decision.strategicAction}`;
-  const pressureMode = /HIGH PRESSURE|BREAK PRESSURE|PRESSURE FIRST|TRIM SATELLITE|HEAVY TRIM/i.test(actionText);
-  const leaderMode = /STRONG FORWARD LEADER|HOLD WINNER|BUILDING RERATING|Near-window rerating/i.test(actionText) && !pressureMode;
+  const window = bestWindowText(stock);
   const forward = parseForwardLeadership(stock);
   const dormancy = capitalDormancyRiskValue(stock);
+  const reviewDays = daysUntilDate(rawBestWindowSource(stock));
+  const reviewMonthIndex = reviewDays === null ? null : Math.max(0, Math.min(8, Math.floor(reviewDays / 30)));
 
-  return [0, 1, 2, 3, 4, 5, 6, 7, 8].map(index => {
-    const label = monthLabel(index, baseIso);
-    const monthStart = addMonthsIso(baseIso, index);
-    const monthEnd = addMonthsIso(baseIso, index + 1);
-    const pressureInMonth = pressureIso && pressureIso >= monthStart && pressureIso < monthEnd;
-    const bestInMonth = bestIso && bestIso >= monthStart && bestIso < monthEnd;
-    let text;
+  let phrases;
+  if (strategic.label === "FULL BUILD") {
+    phrases = [
+      `FULL BUILD active: strategic capital remains approved; add in parts and hold through normal astro pressure.`,
+      `Continuation: maintain strategic build; a separate Break-Risk Review will be shown only if protection becomes actionable.`,
+      `Durability check: forward leadership ${forward ?? "mapped"}/100 remains the guide.`,
+      `Normal-pressure tolerance: ordinary churn is not a passive exit signal.`,
+      `Scale discipline: add only in parts; avoid vertical chase.`,
+      `Strategic checkpoint: keep FULL BUILD while dormancy is ${String(dormancy).toLowerCase()}.`,
+      `Long-cycle background: supportive context remains, but it does not create a new action by itself.`,
+      `Upgrade status: FULL BUILD is already the active strategic instruction.`,
+      `Strategic checkpoint: continue to watch pressure, dormancy, and leadership durability.`
+    ];
+  } else if (strategic.label === "PART BUILD") {
+    phrases = [
+      `PART BUILD active now: limited strategic capital is allowed in the current card.`,
+      `Capital ceiling: keep it part-sized; this is not passive/full-size approval.`,
+      `Durability check: forward leadership ${forward ?? "mapped"}/100 supports the part-build posture.`,
+      `Pressure handling: carry normal astro pressure; protect only blow-off excess, not core conviction.`,
+      `Sizing discipline: stagger and avoid vertical chase; no all-in instruction.`,
+      `Strategic ceiling: PART BUILD remains the ceiling while dormancy is ${String(dormancy).toLowerCase()}.`,
+      `Long-cycle background: constructive context remains, but it does not create a new action by itself.`,
+      `Full-build status: no passive/full-size approval is mapped in this card.`,
+      `Strategic checkpoint: keep PART BUILD unless a later card explicitly changes the strategic action.`
+    ];
+  } else if (strategic.label === "CORE HOLD") {
+    phrases = [
+      `CORE HOLD active: existing strategic/core capital can remain; no fresh strategic build during pressure.`,
+      `Pressure management: ${pressure}. Protect only excess/satellite exposure, not confirmed core.`,
+      `Repair watch: keep fresh strategic capital out until a separate re-entry review is shown.`,
+      `Core discipline: do not convert tactical pressure into a forced long-term exit.`,
+      `Fresh-build block: no new strategic build while pressure dominates the current card.`,
+      `Durability floor: replay learning supports core holding through pressure.`,
+      `Long-cycle background: compounder potential remains background, not a fresh buy signal today.`,
+      `Upgrade status: no fresh full-build approval is mapped in this card.`,
+      `Strategic checkpoint: keep CORE HOLD unless a later card explicitly changes the strategic action.`
+    ];
+  } else if (strategic.label === "WAIT") {
+    phrases = Array.from({ length: 9 }, (_, index) => {
+      if (reviewMonthIndex === null) {
+        return index === 0
+          ? `WAIT active: no fresh strategic capital now; no dated re-entry review is mapped.`
+          : `Strategic discipline: remain WAIT until the app maps a dated expansion/re-entry review.`;
+      }
+      if (index < reviewMonthIndex - 1) {
+        return `WAIT active: no fresh strategic capital now; re-entry review remains ${window}.`;
+      }
+      if (index === reviewMonthIndex - 1) {
+        return `Pre-review month: prepare for ${window}; do not pre-empt the dated review.`;
+      }
+      if (index === reviewMonthIndex) {
+        return `Re-entry review month: ${window}. This is the month to rerun the card for a fresh capital decision; this card does not approve deployment before that date.`;
+      }
+      return `Post-review period: rerun the card after ${window}; today's WAIT instruction should not be projected beyond that review gate.`;
+    });
+  } else if (strategic.label === "PROTECT" || strategic.label === "AVOID") {
+    phrases = [
+      `Protection month: ${pressure}. Avoid fresh strategic capital; reduce only excess/satellite exposure if held.`,
+      `Pressure management month: do not rebuild strategic exposure during the pressure field.`,
+      `Repair watch: next review is ${window}; use it as reassessment, not automatic deployment.`,
+      `Capital protection month: keep strategic risk low.`,
+      `No-fresh month: pressure/dormancy still controls the strategic map.`,
+      `Strategic checkpoint: wait for pressure to clear before considering fresh strategic capital.`,
+      `Long-cycle background: future potential does not override current protection.`,
+      `Strategic discipline: protection comes before hope.`,
+      `Strategic review month: upgrade only when the astro map gives a real expansion review.`
+    ];
+  } else {
+    phrases = [
+      `Strategic watch month: larger capital remains selective.`,
+      `Maintain watch posture; no passive approval yet.`,
+      `Review leadership durability and dormancy.`,
+      `Keep capital limited until the astro field clarifies.`,
+      `No-change month: strategic capital remains selective.`,
+      `Reassess at the next review window.`,
+      `Long-cycle context: ${window}.`,
+      `Long-cycle context only.`,
+      `Strategic review month: wait for a clearer build/protect instruction.`
+    ];
+  }
 
-    if (pressureMode) {
-      if (index === 0 && pressureInMonth) text = `Active pressure month: ${pressure}. Capital posture stays protective; trim satellite/excess into the astro pressure peak.`;
-      else if (index === 1) text = `Post-pressure repair month: reassess only if the hard natal contact has absorbed and leadership stops weakening.`;
-      else if (index <= 3) text = `Natal repair scan: ${accumulation} Use only as a review gate unless pressure has clearly yielded to supportive expansion contacts.`;
-      else if (index <= 5) text = `Fresh capital gate: no strategic deployment unless a new growth window appears. ${growth}`;
-      else text = `Long-range context only: ${accumulation} Do not treat the distant cycle as an immediate buy signal.`;
-    } else if (leaderMode) {
-      if (index === 0 && (pressureInMonth || bestInMonth)) text = `Active leadership month: ${growth} Hold winner / stagger fresh capital; protect only blow-off excess around the pressure window.`;
-      else if (index === 1) text = `Leadership continuation month: keep core while dormancy remains ${String(dormancy).toLowerCase()} and no high/break pressure appears.`;
-      else if (index <= 3) text = `Rerating durability check: forward leadership ${forward ?? "mapped"}/100. Normal/medium pressure is tolerable if expansion contacts remain dominant.`;
-      else if (index <= 5) text = `Selective add checkpoint: use only fresh supportive astro windows; do not chase after vertical expansion.`;
-      else text = `Long-range cycle background: keep the 2027/2028 cycle as context; near-window astrology still decides deployment.`;
-    } else {
-      if (index === 0 && pressureInMonth) text = `Current churn/repair month: ${pressure}. Watch the natal contact absorb; fresh capital remains selective.`;
-      else if (index === 0 && bestInMonth) text = `Review window month: ${accumulation} This is an astro review gate, not a confirmed growth window.`;
-      else if (index === 1) text = `Second-month repair scan: upgrade only if supportive natal contacts appear and leadership rises above candidate threshold.`;
-      else if (index <= 3) text = `Cycle watch only: ${growth} Keep this as watchlist capital until the astro field improves.`;
-      else if (index <= 5) text = `Dormancy control: avoid hopeful deployment if leadership remains mixed or weak.`;
-      else text = `Long-range cycle background only: no immediate rerating window is confirmed.`;
-    }
-
-    return [label, formatDatesInText(text)];
-  });
+  return phrases.map((text, index) => [monthLabel(index, baseIso), formatDatesInText(text)]);
 }
 
 
@@ -3312,6 +3546,10 @@ function PathTable({ title, subtitle, rows }) {
 
 function coreFreshCapitalGuidance(stock) {
   if (!stock?.computed_from_natal) return "Add natal data before core/fresh-capital guidance.";
+  if (stock?.decision_v35) {
+    const c = stock.decision_v35.language?.capital || {};
+    return `Existing position: ${c.existingPosition}. Fresh tactical capital: ${c.freshTacticalCapital}. Strategic capital: ${c.strategicCapital}. Passive long-term: ${c.passiveLongTermCapital}.`;
+  }
   const action = normalizeActionLabel(stock?.action || "WATCH CLOSELY");
   const dormancy = capitalDormancyRiskValue(stock);
   const best = bestWindowText(stock);
@@ -3321,11 +3559,11 @@ function coreFreshCapitalGuidance(stock) {
   }
 
   if (dormancy === "HIGH" || dormancy === "VERY HIGH") {
-    return `Core: keep intact if strategic conviction remains; fresh entry: wait for mapped window ${best}; small tactical trim only into strength.`;
+    return `Core: keep intact if strategic conviction remains; fresh entry: use mapped window ${best}; small tactical trim only into strength.`;
   }
 
   if (action === "WATCH CLOSELY") {
-    return `Core: hold; fresh entry: wait for catalyst absorption in the natal chart; avoid chasing before pressure absorption.`;
+    return `Core: hold; fresh entry: use the catalyst-absorption gate in the natal chart; avoid chasing before pressure absorption.`;
   }
 
   if (action === "HOLD CORE") {
@@ -3371,10 +3609,10 @@ function currentSignalText(stock) {
   const action = normalizeActionLabel(stock?.action || "WATCH CLOSELY");
   if (action === "ACCUMULATE") return "strong window active";
   if (action === "STAGGER ADD") return "early window forming";
-  if (action === "HOLD CORE") return "hold core; avoid fresh chase unless pressure absorbs";
+  if (action === "HOLD CORE") return "hold core; avoid fresh chase until pressure absorption is explicitly shown";
   if (action === "TRIM SATELLITE") return "protect excess";
   if (action === "HEAVY TRIM" || action === "EXIT STRENGTH" || action === "REDUCE / EXIT") return "protect capital";
-  return "watch for a cleaner trigger";
+  return "use the next mapped astro gate";
 }
 
 function textHasAny(value, needles = []) {
@@ -3436,6 +3674,166 @@ function stockWindowDateText(value) {
   return iso ? formatDateReadable(iso) : formatDatesInText(value || "mapped window");
 }
 
+function cleanProductionVerdict(value, fallback = "WATCH") {
+  return String(value || fallback)
+    .replace(/\s+/g, " ")
+    .replace(/PASSIVE LONG-TERM NOT RESOLVED/i, "NOT RESOLVED")
+    .trim();
+}
+
+function researchStateTitle(stock) {
+  const state = cleanProductionVerdict(stock?.production_current_state || "Research synthesis active")
+    .replace(/^Current state:\s*/i, "")
+    .replace(/\s+—\s+(UP|UP-BIASED|SIDEWAYS \/ UNRESOLVED|DOWN \/ PRESSURE-LED|HIGH \/ RESET RISK|LOW|MEDIUM \/ DIGESTION).*$/i, "");
+  const correction = String(correctionModeValue(stock) || "").toUpperCase();
+  const sev = pressureRoutingState(stock).severity?.key || "low";
+  const breakEvidence = /BREAK|PRICE CORRECTION|MIXED CORRECTION|HIGH|VERY HIGH/.test(correction) || sev === "high" || sev === "break";
+  if (!breakEvidence && /EXPANSION THEN BREAK|MAJOR RESET RISK/i.test(state)) {
+    return "ACTIVE EXPANSION WITH FUTURE PROTECTION GATE";
+  }
+  return state;
+}
+
+function researchCapitalIntent(stock) {
+  const state = cleanProductionVerdict(stock?.production_current_state || "");
+  const tactical = cleanProductionVerdict(stock?.production_tactical_action || stock?.action || "");
+  const strategic = cleanProductionVerdict(stock?.production_strategic_action || "");
+  const passive = cleanProductionVerdict(stock?.production_passive_verdict || "");
+  const joined = `${state} ${tactical} ${strategic} ${passive} ${stock?.correction_mode || ""}`;
+  const tacticalScore = tacticalScoreValue(stock) ?? Number(stock?.tactical_score ?? 0);
+  const leadership = Number(stock?.leadership_probability ?? stock?.tactical_leadership ?? 0);
+  const pressure = Number(stock?.pressure_score ?? stock?.current_pressure_score ?? 0);
+  const expansion = Number(stock?.expansion_score ?? stock?.current_expansion_score ?? 0);
+
+  const defensive = /EXIT|AVOID|PROTECT \/ OBSERVE|BLOCK FRESH|PRESSURE EXPRESSION|PRICE CORRECTION|DOWN \/ PRESSURE-LED/i.test(joined)
+    || (pressure >= 65 && pressure >= expansion + 8)
+    || (tacticalScore > 0 && tacticalScore < 5 && leadership < 50);
+  const strategicBlocked = /TACTICAL ONLY|NO FRESH STRATEGIC|AVOID FRESH STRATEGIC|NOT PASSIVE|PASSIVE LONG-TERM NO/i.test(joined);
+  const conditional = /CONDITIONAL|ACTIVE MANAGEMENT|PROTECTION DATE REQUIRED/i.test(joined);
+  const constructive = /ENTER \/ ADD NOW|HOLD \/ PART-SIZED ENTRY|STAGGER ADD|ACCUMULATE|ACTIVE EXPANSION/i.test(joined) && !defensive;
+
+  if (defensive) return "DEFENSIVE";
+  if (strategicBlocked && constructive) return "TACTICAL_ONLY";
+  if (conditional) return "CONDITIONAL";
+  if (constructive) return "CONSTRUCTIVE";
+  return "SELECTIVE";
+}
+function defensiveActionSeverity(stock) {
+  const tacticalScore = tacticalScoreValue(stock) ?? Number(stock?.tactical_score ?? 0);
+  const leadership = Number(stock?.leadership_probability ?? stock?.tactical_leadership ?? 0);
+  const pressure = Number(stock?.pressure_score ?? stock?.current_pressure_score ?? 0);
+  const correction = String(correctionModeValue(stock) || stock?.correction_mode || "").toUpperCase();
+  const state = cleanProductionVerdict(stock?.production_current_state || stock?.signal || stock?.action || "").toUpperCase();
+  const breakLike = /BREAK|SEVERE|STRUCTURAL RESET/.test(`${correction} ${state}`);
+  const priceCorrection = /PRICE CORRECTION/.test(correction);
+
+  // EXIT STRENGTH is rare: it means existing exposure should be reduced aggressively into strength.
+  if ((breakLike || pressure >= 88) && tacticalScore > 0 && tacticalScore <= 3.2 && leadership < 35) return "EXIT STRENGTH";
+  if ((breakLike || pressure >= 78) && tacticalScore > 0 && tacticalScore < 4.2 && leadership < 45) return "HEAVY TRIM";
+  if ((priceCorrection || pressure >= 68) && tacticalScore > 0 && tacticalScore < 5.0 && leadership < 50) return "TRIM SATELLITE";
+  return "NO FRESH";
+}
+
+function defensiveCapitalPhrase(stock) {
+  const severity = defensiveActionSeverity(stock);
+  if (severity === "EXIT STRENGTH") return "exit-strength protection: use strength to reduce aggressively; no fresh entry";
+  if (severity === "HEAVY TRIM") return "heavy-trim protection: reduce meaningfully; no fresh entry until pressure clears";
+  if (severity === "TRIM SATELLITE") return "trim satellite/excess exposure; hold only pre-defined core; no fresh entry";
+  return "hold existing core; do not add fresh capital until the mapped astro gate clears";
+}
+
+
+function futureGatePhrase(stock, date, opts = {}) {
+  if (!date) return "";
+  const when = formatDateReadable(date);
+  const intent = researchCapitalIntent(stock);
+  if (opts.kind === "protection") {
+    if (intent === "DEFENSIVE") return `Defensive review near ${when}: check pressure clearance before any re-entry.`;
+    return `Protection review near ${when}: protect excess exposure; no fresh capital.`;
+  }
+  if (intent === "DEFENSIVE") return `Future recovery/re-entry gate near ${when}: reassess after pressure phase clearance.`;
+  if (intent === "TACTICAL_ONLY") return `Next tactical acceleration gate near ${when}: use staggered sizing; not passive approval.`;
+  if (intent === "CONDITIONAL") return `Conditional build gate near ${when}: reassess build status at this future astro window.`;
+  if (intent === "CONSTRUCTIVE") return `Upside acceleration gate near ${when}: deploy only through staggered sizing, not vertical chase.`;
+  return `Astro decision gate near ${when}: reassess from the mapped transit shift, not from price confirmation.`;
+}
+
+function researchMainLabel(stock) {
+  const stateTitle = researchStateTitle(stock);
+  const protection = stock?.production_protection_date ? ` ${futureGatePhrase(stock, stock.production_protection_date, { kind: "protection" })}` : "";
+  const intent = researchCapitalIntent(stock);
+
+  if (intent === "DEFENSIVE") {
+    return `${stateTitle} — defensive now: ${defensiveCapitalPhrase(stock)}.${protection}`;
+  }
+
+  if (intent === "TACTICAL_ONLY") {
+    return `${stateTitle} — tactical participation allowed; do not convert this into passive long-term capital.${protection}`;
+  }
+
+  if (intent === "CONDITIONAL") {
+    return `${stateTitle} — conditional build only; capital action depends on the next mapped astro gate.${protection}`;
+  }
+
+  if (intent === "CONSTRUCTIVE") {
+    return `${stateTitle} — constructive tactical window; stagger entries and protect only excess.${protection}`;
+  }
+
+  return `${stateTitle} — selective setup; capital waits for the next mapped astro gate.${protection}`;
+}
+
+function tacticalDisplayFromResearch(value, stock = null) {
+  const raw = cleanProductionVerdict(value || "WATCH CLOSELY");
+  const intent = stock ? researchCapitalIntent(stock) : "SELECTIVE";
+  if (intent === "DEFENSIVE") {
+    const severity = defensiveActionSeverity(stock);
+    if (severity === "EXIT STRENGTH") return "EXIT STRENGTH — use strength to reduce aggressively; no fresh entry.";
+    if (severity === "HEAVY TRIM") return "HEAVY TRIM — reduce meaningfully; no fresh entry until pressure clears.";
+    if (severity === "TRIM SATELLITE") return "TRIM SATELLITE — reduce excess/satellite exposure; no fresh entry.";
+    return "HOLD CORE / NO FRESH — existing core may be held; do not add fresh capital.";
+  }
+  if (/ENTER \/ ADD NOW/i.test(raw)) return "STAGGER ADD — active tactical window; deploy in parts, not vertically.";
+  if (/HOLD \/ PART-SIZED ENTRY/i.test(raw)) return "STAGGER ADD — part-sized entry; keep sizing disciplined.";
+  return raw
+    .replace(/WATCH CLOSELY —/i, "ASTRO GATE PENDING —")
+    .replace(/WATCHLIST ONLY —/i, "NATAL/ASTRO DATA GATE —")
+    .replace(/WATCH \/ PROTECT/i, "PROTECT / WAIT FOR PRESSURE CLEARANCE");
+}
+
+function strategicDisplayFromResearch(stock) {
+  const raw = cleanProductionVerdict(stock?.production_strategic_action || "STRATEGIC WATCH");
+  const protection = stock?.production_protection_date ? ` ${futureGatePhrase(stock, stock.production_protection_date, { kind: "protection" })}` : "";
+  const accel = stock?.production_acceleration_date ? ` ${futureGatePhrase(stock, stock.production_acceleration_date, { kind: "acceleration" })}` : "";
+  const intent = researchCapitalIntent(stock);
+  let base = raw
+    .replace(/TACTICAL ONLY — NO FRESH STRATEGIC CAPITAL/i, "TACTICAL ONLY — no fresh strategic capital")
+    .replace(/CONDITIONAL — PROTECTION DATE REQUIRED/i, "CONDITIONAL — protection date required")
+    .replace(/ACTIVE EXPANSION WITH MAJOR RESET RISK/i, "ACTIVE EXPANSION — manage/reset risk")
+    .replace(/EXPANSION THEN BREAK \/ POST-BREAK REPAIR/i, "EXPANSION FIRST — then repair/reset phase")
+    .replace(/STRATEGIC WATCH/i, "STRATEGIC ASTRO GATE PENDING");
+
+  if (intent === "DEFENSIVE" && !/AVOID|TACTICAL ONLY|NO FRESH/i.test(base)) base = "AVOID FRESH STRATEGIC CAPITAL";
+  if (intent === "TACTICAL_ONLY" && /Strong leadership candidate/i.test(base)) base = "FORWARD LEADERSHIP VISIBLE — strategic capital still blocked until reset risk clears";
+  return `${base}.${protection}${accel}`.replace(/\.\./g, ".").trim();
+}
+
+function strategicActionCompact(value, stock = null) {
+  if (stock?.decision_v35) {
+    return String(stock.decision_v35.capitalDecision?.strategicCapital || "WAIT").replaceAll("_", " ");
+  }
+  const text = String(value || "").toUpperCase();
+  const intent = stock ? researchCapitalIntent(stock) : "";
+  if (/WATCHLIST|ADD NATAL|NATAL DATA/.test(text)) return "NATAL PENDING";
+  if (/EXIT|HEAVY TRIM|CAPITAL PROTECTION|PRESSURE FIRST|AVOID FRESH/.test(text) || intent === "DEFENSIVE") return "AVOID FRESH";
+  if (/TACTICAL ONLY|NO FRESH STRATEGIC|NOT PASSIVE/.test(text) || intent === "TACTICAL_ONLY") return "TACTICAL ONLY";
+  if (/CONDITIONAL BUILD/.test(text)) return "CONDITIONAL BUILD";
+  if (/CONDITIONAL|ACTIVE MANAGEMENT|PROTECTION DATE REQUIRED/.test(text) || intent === "CONDITIONAL") return "CONDITIONAL";
+  if (/PRIORITY LEADER|STRONG FORWARD LEADER|FORWARD LEADERSHIP|LEADER/.test(text)) return "LEADER";
+  if (/DEFERRED/.test(text)) return "DEFERRED";
+  if (/WATCH|GATE|WAIT/.test(text)) return "WATCH GATE";
+  return shortText(String(value || "WATCH GATE").split(/[.—]/)[0].trim(), 28);
+}
+
 function finalStockDecision(stock) {
   if (!stock?.computed_from_natal) {
     return {
@@ -3446,6 +3844,56 @@ function finalStockDecision(stock) {
       dormancyText: "UNSCORABLE — natal data pending.",
       correctionText: "Not assessed.",
       primaryBucket: "NATAL_PENDING"
+    };
+  }
+
+  if (stock?.production_source === "v35.0-holistic-astro-to-capital" && stock?.decision_v35) {
+    const v35 = stock.decision_v35;
+    const language = v35.language || {};
+    const capital = language.capital || {};
+    const behaviour = String(v35.behaviour?.state || "").replaceAll("_", " ");
+    const pressureType = String(v35.astroTruth?.pressureType || "").replaceAll("_", " ");
+    const bucket = v35.capitalDecision?.strategicCapital || "WAIT";
+    return {
+      mainLabel: language.singleStory || `${behaviour} — ${pressureType}`,
+      tacticalAction: `EXISTING POSITION: ${capital.existingPosition || "HOLD / REVIEW"}. FRESH TACTICAL CAPITAL: ${capital.freshTacticalCapital || "NO FRESH"}.`,
+      strategicAction: `STRATEGIC CAPITAL: ${capital.strategicCapital || "WAIT"}. ${language.strategicNote || ""} PASSIVE LONG-TERM: ${capital.passiveLongTermCapital || "NOT APPROVED"}.`,
+      capitalPosture: `Existing position: ${capital.existingPosition || "HOLD / REVIEW"}. Fresh tactical capital: ${capital.freshTacticalCapital || "NO FRESH"}. Strategic capital: ${capital.strategicCapital || "WAIT"}. Passive long-term capital: ${capital.passiveLongTermCapital || "NOT APPROVED"}.`,
+      dormancyText: v35.behaviour?.capitalEfficiency === "LOW"
+        ? "DORMANT CAPITAL — current astrology indicates low capital efficiency."
+        : `${v35.behaviour?.capitalEfficiency || "SELECTIVE"} — no independent dormancy override applied.`,
+      correctionText: `${v35.astroTruth?.correctionMode || "NORMAL"} — ${v35.astroTruth?.breakState?.mapped ? "break/reset risk mapped" : "no break-risk mapped"}.`,
+      timingPath: language.timingPath || "No later decision gate mapped.",
+      primaryBucket: bucket === "FULL_BUILD" ? "FULL_BUILD" : bucket === "PART_BUILD" ? "PART_BUILD" : "WAIT",
+      conflictType: "v35-holistic-pipeline",
+      decisionTrace: v35.decisionTrace || []
+    };
+  }
+
+  if (stock?.production_source === "v33.1-research-promoted" && stock?.production_current_state) {
+    const tacticalRaw = cleanProductionVerdict(stock.production_tactical_action || "WATCH CLOSELY");
+    const tacticalDisplay = tacticalDisplayFromResearch(tacticalRaw, stock);
+    const passiveVerdict = cleanProductionVerdict(stock.production_passive_verdict || "PASSIVE LONG-TERM NOT RESOLVED");
+    const dormancy = stock.production_dormancy_type || capitalDormancyRiskValue(stock);
+    return {
+      mainLabel: formatDatesInText(researchMainLabel(stock)),
+      tacticalAction: formatDatesInText(tacticalDisplay),
+      strategicAction: formatDatesInText(strategicDisplayFromResearch(stock)),
+      capitalPosture: formatDatesInText(coreFreshSplitText(stock, tacticalDisplay, cleanProductionVerdict(stock.production_strategic_action || "astro gate pending"), passiveVerdict)),
+      dormancyText: dormancy === "NO CURRENT DORMANCY"
+        ? `LOW / ACTIVE WINDOW — ${stock.production_dormancy_reason || "usable current support is present; do not defer capital only because a later window looks cleaner."}`
+        : dormancyRiskText(stock, { full: true }),
+      correctionText: correctionModeText(stock, { full: true }),
+      primaryBucket: researchCapitalIntent(stock) === "DEFENSIVE"
+        ? "PRESSURE"
+        : researchCapitalIntent(stock) === "TACTICAL_ONLY"
+          ? "TACTICAL_MANAGED"
+          : researchCapitalIntent(stock) === "CONDITIONAL"
+            ? "CONDITIONAL"
+            : researchCapitalIntent(stock) === "CONSTRUCTIVE"
+              ? "TACTICAL"
+              : "RESEARCH_PROMOTED",
+      conflictType: "research-promoted"
     };
   }
 
@@ -3511,25 +3959,25 @@ function finalStockDecision(stock) {
     } else if (earlyButUnclean) {
       mainLabel = `EARLY WINDOW / CONFIRMATION NEEDED — stagger only after the natal contact turns supportive`;
       tacticalAction = `STAGGER CAREFULLY — early window visible, but leadership is not yet winner-grade (${Math.round(leadership)}/100).`;
-      strategicAction = strongForward ? `SELECTIVE FORWARD LEADER — mapped window ${best}; wait for astro confirmation before sizing up.` : `RALLY WITH CHURN — usable but not priority; protect excess only.`;
+      strategicAction = strongForward ? `SELECTIVE FORWARD LEADER — mapped window ${best}; use mapped astro confirmation before sizing up.` : `RALLY WITH CHURN — usable but not priority; protect excess only.`;
       capitalPosture = `Core: hold selectively; fresh capital only in small tranches after supportive natal contact.`;
       primaryBucket = "GENERAL";
     } else {
-      mainLabel = `REPAIR WATCH — accumulation may be opening, but leadership is not astrologically confirmed`;
-      tacticalAction = `WATCH CLOSELY — wait for catalyst absorption in the natal chart (${tacticalScoreNum.toFixed(1)}/10; leadership ${Math.round(leadership)}/100).`;
-      strategicAction = strategicScoreNum >= 6.5 ? `RALLY WITH CHURN — potential exists, but wait for supportive natal contacts before upgrading it to a rerating window.` : `WAIT FOR NATAL SUPPORT — not a strategic leader yet.`;
+      mainLabel = `REPAIR GATE — accumulation may be opening, but leadership is not astrologically confirmed`;
+      tacticalAction = `WATCH CLOSELY — use the catalyst-absorption gate in the natal chart (${tacticalScoreNum.toFixed(1)}/10; leadership ${Math.round(leadership)}/100).`;
+      strategicAction = strategicScoreNum >= 6.5 ? `RALLY WITH CHURN — potential exists, but upgrade to rerating only when supportive natal contacts are mapped.` : `NATAL SUPPORT GATE PENDING — not a strategic leader yet.`;
       capitalPosture = `Core: hold only if already positioned; fresh capital waits for confirmation.`;
       primaryBucket = "GENERAL";
     }
   } else if (pressure >= 70 && pressure > expansion + 8) {
-    mainLabel = `PRESSURE FIRST — wait for repair near ${bestWhen}`;
-    tacticalAction = `WATCH CLOSELY — pressure dominates until repair or catalyst confirmation.`;
-    strategicAction = strongForward ? `DEFERRED LEADER — wait for mapped window ${best}.` : `PRESSURE FIRST — reassess near ${best}.`;
+    mainLabel = `PRESSURE FIRST — capital stays out until repair gate near ${bestWhen}`;
+    tacticalAction = `PRESSURE GATE ACTIVE — pressure dominates until repair or catalyst confirmation.`;
+    strategicAction = strongForward ? `DEFERRED LEADER — use mapped window ${best}.` : `PRESSURE FIRST — reassess near ${best}.`;
     capitalPosture = `Core: hold only if conviction remains; fresh capital waits for pressure absorption.`;
     primaryBucket = "DORMANT";
   } else if (strongForward && weakNow) {
-    mainLabel = `DEFERRED LEADER — wait for mapped window ${bestWhen}`;
-    tacticalAction = `WATCH CLOSELY — no clean tactical edge yet; wait for catalyst activation.`;
+    mainLabel = `DEFERRED LEADER — use mapped window ${bestWhen}`;
+    tacticalAction = `ASTRO GATE PENDING — no clean tactical edge yet; use the catalyst-activation gate.`;
     strategicAction = `STRONG FORWARD LEADER — mapped window ${best}.`;
     capitalPosture = `Core: monitor; fresh capital waits for the mapped forward window.`;
     primaryBucket = "DORMANT";
@@ -3543,10 +3991,10 @@ function finalStockDecision(stock) {
 
   // Final score/action sanity checks.
   if (/STAGGER ADD|ACCUMULATE|LEADER|RERATING/i.test(tacticalAction) && tacticalScoreNum < 5.4 && !activeExpansion) {
-    tacticalAction = `WATCH CLOSELY — tactical idea exists, but score remains selective (${tacticalScoreNum.toFixed(1)}/10).`;
+    tacticalAction = `ASTRO GATE PENDING — tactical idea exists, but score remains selective (${tacticalScoreNum.toFixed(1)}/10).`;
   }
   if (/STAGGER ADD|ACCUMULATE|HOLD WINNER|RERATING/i.test(tacticalAction) && (tacticalScoreNum < 5.5 || leadership < 50)) {
-    tacticalAction = `WATCH CLOSELY — pressure/score guardrail active (${tacticalScoreNum.toFixed(1)}/10; leadership ${Math.round(leadership)}/100).`;
+    tacticalAction = `ASTRO GATE PENDING — pressure/score guardrail active (${tacticalScoreNum.toFixed(1)}/10; leadership ${Math.round(leadership)}/100).`;
   }
   if (/PRIORITY|STRONG FORWARD LEADER/i.test(strategicAction) && strategicScoreNum < 6.5) {
     strategicAction = `RALLY WITH CHURN — participate selectively; strategic score is not yet leader-grade.`;
@@ -3558,16 +4006,16 @@ function finalStockDecision(stock) {
     const usableWindow = activeExpansion || tacticalScoreNum >= 6.6 || expansion >= pressure - 4;
     if (/HEAVY TRIM|TRIM SATELLITE|PRESSURE FIRST|BREAK PRESSURE|HIGH PRESSURE/i.test(`${mainLabel} ${tacticalAction} ${strategicAction}`)) {
       if (usableWindow) {
-        mainLabel = `${pressureSeverity.label} CHURN — usable but not clean; stagger and wait for astro confirmation`;
-        tacticalAction = `WATCH / STAGGER CAREFULLY — ${pressureSeverity.label.toLowerCase()} is tactical noise/digestion, not an exit signal.`;
+        mainLabel = `${pressureSeverity.label} CHURN — usable but not clean; stagger and use mapped astro confirmation`;
+        tacticalAction = `STAGGER ONLY IF SUPPORT HOLDS — ${pressureSeverity.label.toLowerCase()} is tactical noise/digestion, not an exit signal.`;
         strategicAction = strongForward
           ? `HOLD CORE / SELECTIVE ACCUMULATION — strategic thesis remains alive; do not let ${pressureSeverity.label.toLowerCase()} dominate.`
           : `WAIT FOR CONFIRMATION — no strategic pressure break is mapped.`;
         capitalPosture = `Core: hold selectively; fresh capital can be staggered only around catalyst absorption. Protect excess, not core.`;
         primaryBucket = usableWindow ? "TACTICAL" : primaryBucket;
       } else {
-        mainLabel = `WATCH / REPAIR WINDOW — ${pressureSeverity.label.toLowerCase()} suggests delay, not strategic break.`;
-        tacticalAction = `WATCH CLOSELY — wait for astro confirmation; do not treat ${pressureSeverity.label.toLowerCase()} as trim pressure.`;
+        mainLabel = `ASTRO REPAIR GATE — ${pressureSeverity.label.toLowerCase()} suggests delay, not strategic break.`;
+        tacticalAction = `WATCH CLOSELY — use mapped astro confirmation; do not treat ${pressureSeverity.label.toLowerCase()} as trim pressure.`;
         strategicAction = `WAIT FOR CONFIRMATION — strategic protection requires high/break pressure, not ${pressureSeverity.label.toLowerCase()}.`;
         capitalPosture = `Core: hold only if conviction remains; fresh capital waits for confirmation.`;
       }
@@ -3586,170 +4034,21 @@ function finalStockDecision(stock) {
   };
 }
 
-
-function trmScoresForStock(stock) {
-  const fit = stock?.transit_receptor_fit || {};
-  const scores = fit.scores || {};
-  const n = value => numericValue(value);
-  return {
-    fit,
-    expressionClass: String(fit.expressionClass || stock?.transit_receptor_class || "").toUpperCase(),
-    expressionLabel: fit.expressionLabel || stock?.transit_receptor_expression || "",
-    reading: fit.reading || stock?.transit_receptor_reading || "",
-    expression: n(scores.expressionScore ?? stock?.transit_receptor_score),
-    confidence: n(scores.confidenceScore),
-    sector: n(scores.sectorThemeFit),
-    receptor: n(scores.natalReceptorStrength),
-    pressure: n(scores.pressureInterference),
-    historicalEcho: n(scores.historicalEcho),
-    fundamentals: n(scores.fundamentalTransmission),
-    natalReliability: n(scores.natalReliability)
-  };
-}
-
-function trmDriverType(stock) {
-  const trm = trmScoresForStock(stock);
-  const cls = trm.expressionClass;
-  if (cls.includes("PRESSURE")) return "Pressure-led";
-  if (cls.includes("ROTATION")) return "Rotation-away";
-  if (trm.sector !== null && trm.sector >= 60 && trm.receptor !== null && trm.receptor >= 60) return "Sector + natal-led";
-  if (trm.sector !== null && trm.sector >= 60) return "Sector-led";
-  if (trm.receptor !== null && trm.receptor >= 70) return "Natal-led";
-  if (trm.historicalEcho !== null && trm.historicalEcho >= 65) return "Replay-led";
-  return "Mixed";
-}
-
-function finalSynthesisLabel(stock) {
-  const trm = trmScoresForStock(stock);
-  const cls = trm.expressionClass;
-  const sector = trm.sector ?? 50;
-  const receptor = trm.receptor ?? 50;
-  const pressure = trm.pressure ?? 50;
-  const expression = trm.expression ?? numericValue(stock?.transit_receptor_score) ?? 50;
-  const historicalEcho = trm.historicalEcho ?? 50;
-  const contradictionText = String(stock?.contradiction_severity || stock?.contradictionReport?.severity || "").toUpperCase();
-
-  let label = "Mixed / watch";
-  let level = "Medium";
-  let capReason = null;
-
-  if (cls.includes("PRESSURE")) {
-    label = "Pressure absorption";
-    level = pressure >= 75 ? "High restraint" : "Caution";
-  } else if (cls.includes("ROTATION")) {
-    label = "Rotation-away risk";
-    level = "Restraint";
-  } else if (cls === "RERATING_TRANSIT" && sector >= 60 && receptor >= 60 && pressure <= 55 && historicalEcho >= 55) {
-    label = "Sector-led rerating";
-    level = expression >= 80 ? "High" : "Medium-high";
-  } else if (receptor >= 70 && sector < 45) {
-    label = "Natal-led constructive setup";
-    level = expression >= 70 ? "Medium-high" : "Medium";
-    capReason = "Sector fit is weak, so the card should not call this a clean sector-rerating transit.";
-  } else if (cls === "CONTESTED_EXPANSION" || pressure >= 55) {
-    label = "Contested expansion";
-    level = "Conditional";
-  } else if (cls === "SUPPORTIVE_BUT_MUTED" || expression < 65) {
-    label = "Supportive but muted";
-    level = "Watch / selective";
-  } else if (sector >= 60 && receptor >= 60) {
-    label = "Constructive receptor setup";
-    level = "Medium-high";
-  }
-
-  if ((sector < 45 || historicalEcho < 55) && /HIGH/i.test(level) && label.includes("rerating")) {
-    level = "Medium-high";
-    capReason = "High-conviction rerating language is capped until sector fit and replay memory improve.";
-  }
-
-  if (contradictionText.includes("HIGH") || contradictionText.includes("CRITICAL")) {
-    level = "Conditional";
-    capReason = "Contradiction engine is active; capital language is capped.";
-  }
-
-  return { label, level, capReason, driver: trmDriverType(stock), trm };
-}
-
-function dadSummaryText(stock) {
-  const syn = finalSynthesisLabel(stock);
-  const parts = resolvedActionParts(stock);
-  const pressure = pressureWindowText(stock);
-  const trm = syn.trm;
-  const sectorPhrase = trm.sector !== null && trm.sector < 45 ? "This is not a clean sector-wide rerating setup" : "The sector/receptor fit is usable";
-  const pressurePhrase = trm.pressure !== null && trm.pressure >= 65
-    ? "pressure is high, so fresh capital should wait or be protected"
-    : "pressure is manageable if position size is disciplined";
-  const fresh = parts.freshCapital === "STAGGER ADD" ? "add only slowly" :
-    parts.freshCapital === "WATCH CLOSELY" ? "wait for a cleaner trigger before adding" :
-    parts.freshCapital === "ACCUMULATE" ? "add gradually, not in one shot" :
-    parts.freshCapital.toLowerCase();
-
-  return `Hold existing exposure according to core conviction. For fresh capital, ${fresh}. ${sectorPhrase}; the main driver is ${syn.driver.toLowerCase()} and ${pressurePhrase}. Review around ${pressure}.`;
-}
-
-function synthesisBullets(stock) {
-  const syn = finalSynthesisLabel(stock);
-  const trm = syn.trm;
-  const positives = [];
-  const cautions = [];
-  if ((trm.receptor ?? 0) >= 65) positives.push(`Natal receptor is strong (${Math.round(trm.receptor)}/100).`);
-  if ((trm.pressure ?? 100) <= 45) positives.push(`Pressure interference is manageable (${Math.round(trm.pressure)}/100).`);
-  if ((numericValue(stock?.leadership_probability) ?? 0) >= 65) positives.push(`Current leadership is developing (${Math.round(numericValue(stock.leadership_probability))}/100).`);
-  if (capitalDormancyRiskValue(stock) === "LOW") positives.push("Capital dormancy risk is low.");
-
-  if ((trm.sector ?? 100) < 45) cautions.push(`Sector fit is weak (${Math.round(trm.sector)}/100); avoid clean sector-rerating language.`);
-  if ((trm.historicalEcho ?? 50) <= 50) cautions.push("Replay memory is not populated yet, so confidence should remain capped.");
-  if ((trm.pressure ?? 0) >= 65) cautions.push(`Pressure interference is high (${Math.round(trm.pressure)}/100); fresh allocation needs restraint.`);
-  if ((trm.natalReliability ?? 100) < 60) cautions.push(`Natal reliability is below production-grade (${Math.round(trm.natalReliability)}/100).`);
-  if (syn.capReason) cautions.push(syn.capReason);
-
-  return { positives: positives.length ? positives : ["No strong positive driver displayed yet."], cautions: cautions.length ? cautions : ["No major contradiction displayed by the synthesis layer."] };
-}
-
-function SynthesisBox({ stock }) {
-  const syn = finalSynthesisLabel(stock);
-  const bullets = synthesisBullets(stock);
-  const strongRisk = /Pressure|Rotation|restraint|Conditional/i.test(`${syn.label} ${syn.level}`);
-  return (
-    <div style={{
-      margin: "14px 0 12px",
-      padding: "14px 16px",
-      border: strongRisk ? "1px solid #fdba74" : "1px solid #5eead4",
-      background: strongRisk ? "#fff7ed" : "#f0fdfa",
-      borderRadius: 14,
-      color: strongRisk ? "#9a3412" : "#134e4a"
-    }}>
-      <div style={miniLabelStyle}>Dad Summary</div>
-      <div style={{ fontWeight: 800, margin: "4px 0 6px" }}>{syn.label}: {syn.level}</div>
-      <div style={{ lineHeight: 1.45 }}>{dadSummaryText(stock)}</div>
-      <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
-        <div style={{ background: "rgba(255,255,255,0.65)", borderRadius: 10, padding: 10 }}>
-          <div style={miniLabelStyle}>Positive drivers</div>
-          <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>{bullets.positives.map((x, i) => <li key={`p-${i}`}>{x}</li>)}</ul>
-        </div>
-        <div style={{ background: "rgba(255,255,255,0.65)", borderRadius: 10, padding: 10 }}>
-          <div style={miniLabelStyle}>Caution drivers</div>
-          <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>{bullets.cautions.map((x, i) => <li key={`c-${i}`}>{x}</li>)}</ul>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function cyclePotentialDisplay(stock) {
-  const raw = String(stock.cycle_multibagger_potential || stock.multibagger_probability || "-").toUpperCase();
-  const score = stock.cycle_potential_score ? ` · score ${stock.cycle_potential_score}` : "";
-  const trm = trmScoresForStock(stock);
-  const currentUsability =
-    (trm.pressure ?? 0) >= 65 ? "Current usability: restraint/protection" :
-    (trm.expression ?? 0) >= 70 ? "Current usability: constructive" :
-    (trm.expression ?? 0) >= 55 ? "Current usability: staggered/selective" :
-    "Current usability: watch";
-  return `Long-range cycle potential: ${raw}${score}. ${currentUsability}.`;
-}
-
 function reratingRunwayObserver(stock) {
   if (!stock?.computed_from_natal) return null;
+  if (stock?.decision_v35) {
+    const v35 = stock.decision_v35;
+    if (!["RERATING_IGNITION", "CLEAN_EXPANSION", "ACTIVE_TACTICAL_LEADERSHIP", "MATURE_LEADER"].includes(v35.behaviour?.state)) return null;
+    const gate = v35.timingPath?.strategicGate || null;
+    return {
+      kind: "runway",
+      tone: "teal",
+      title: String(v35.behaviour.state).replaceAll("_", " "),
+      level: v35.astroTruth?.cyclePotential >= 85 ? "RARE" : v35.astroTruth?.cyclePotential >= 72 ? "HIGH" : "DEVELOPING",
+      reason: `Runway score ${v35.astroTruth?.cyclePotential ?? "—"}/100; confidence ${v35.behaviour?.confidence ?? "—"}/100; ${v35.astroTruth?.breakState?.mapped ? "break-risk mapped" : "no break-risk mapped"}`,
+      implication: `${v35.language?.strategicNote || ""}${gate ? ` Next ${v35GateRoleLabel(gate.role).toLowerCase()}: ${formatDateReadable(gate.date)}${gate.signalClass ? ` — ${String(gate.signalClass).replaceAll("_", " ").toLowerCase()}` : ""}.` : " No strategic reversal/protection gate mapped."}`
+    };
+  }
   const { pressure, expansion, forwardLeadership } = stockPressureExpansionState(stock);
   const tactical = tacticalScoreValue(stock) ?? 5;
   const strategic = strategicScoreValue(stock) ?? 5;
@@ -3762,18 +4061,6 @@ function reratingRunwayObserver(stock) {
   const days = mappedWindowDaysValue(stock);
   const correction = String(correctionModeValue(stock) || "").toLowerCase();
   const best = bestWindowText(stock);
-  const syn = finalSynthesisLabel(stock);
-  const trm = syn.trm;
-  const sectorFit = trm.sector ?? 50;
-  const receptorFit = trm.receptor ?? 50;
-  const trmExpression = trm.expression ?? 50;
-  const historicalEcho = trm.historicalEcho ?? 50;
-  const trmPressure = trm.pressure ?? 50;
-  const reratingCapped =
-    sectorFit < 45 ||
-    historicalEcho <= 50 ||
-    trmExpression < 70 ||
-    trmPressure > 55;
 
   // No hope-box for broken or sleepy capital. If money is likely to sit for more
   // than ~6 months, or hard pressure dominates, the stock should not attract
@@ -3811,17 +4098,13 @@ function reratingRunwayObserver(stock) {
     if (strategic >= 7) reasons.push(`strategic score ${strategic.toFixed(1)}/10`);
     if (dormancy === "LOW") reasons.push("low dormancy");
     if (sev.key === "low" || sev.key === "medium") reasons.push(`${sev.label.toLowerCase()} is manageable`);
-    if (sectorFit < 45 && receptorFit >= 70) reasons.push("natal-led rather than sector-led");
-    if (historicalEcho <= 50) reasons.push("replay memory not yet populated");
     return {
-      kind: reratingCapped ? "constructive" : "runway",
-      tone: reratingCapped ? "amber" : "teal",
-      title: reratingCapped ? syn.label : "Sector-led rerating candidate",
-      level: reratingCapped ? syn.level : (strategic >= 8 || durability >= 78 || cycleMB === "EXTREME" ? "HIGH" : "MODERATE"),
+      kind: "runway",
+      tone: "teal",
+      title: "Near-window rerating candidate",
+      level: strategic >= 8 || durability >= 78 || cycleMB === "EXTREME" ? "HIGH" : "MODERATE",
       reason: reasons.join("; ") || "near-term expansion and leadership are aligned",
-      implication: reratingCapped
-        ? `Mapped astro window: ${best}. Use staggered/selective capital only; high rerating language is capped by TRM sector/replay/pressure checks.`
-        : `Mapped astro window: ${best}. This is not an all-in buy signal; it says normal/medium pressure should be tolerated when tactical astrology also supports it.`
+      implication: `Astro window: ${best}. Instruction: use part-sized capital and tolerate normal astro pressure; this is not full-size or passive approval.`
     };
   }
 
@@ -3834,159 +4117,514 @@ function reratingRunwayObserver(stock) {
     title: "Cycle Watch",
     level: "POTENTIAL",
     reason: reasons.join("; "),
-    implication: "Background rerating potential exists, but the near-term runway is not active yet. Wait for tactical leadership, low dormancy, and catalyst confirmation before giving it capital attention."
+    implication: (tactical >= 7 && dormancy === "LOW")
+      ? "Near-term tactical participation is active, but the larger rerating runway is still conditional. Stagger now; do not upgrade to full-size/passive capital yet."
+      : "Background rerating potential exists, but deployable capital remains limited. Keep it on the astro review path before giving it larger capital attention."
   };
 }
 
+
 function ReratingRunwayBox({ runway }) {
-  if (!runway) return null;
-  const isTeal = runway.tone === "teal";
-  const isAmber = runway.tone === "amber";
+  // v34.2: this box appears only for rerating-ready / near-window stocks.
+  // Cycle-watch and distant potential remain in the tactical/strategic columns
+  // so the simple story does not over-promote future hope.
+  if (!runway || runway.tone !== "teal") return null;
   return (
     <div style={{
       margin: "14px 0 12px",
       padding: "12px 14px",
-      border: isTeal ? "1px solid #5eead4" : isAmber ? "1px solid #fbbf24" : "1px solid #d1d5db",
-      background: isTeal ? "#ccfbf1" : isAmber ? "#fffbeb" : "#f3f4f6",
+      border: "1px solid #5eead4",
+      background: "#ccfbf1",
       borderRadius: 14,
-      color: isTeal ? "#134e4a" : isAmber ? "#92400e" : "#374151"
+      color: "#134e4a"
     }}>
       <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>
-        {isTeal ? "Rerating Runway Observer" : isAmber ? "Constructive Setup Observer" : "Cycle Watch Observer"}
+        Rerating Window Observer
       </div>
-      <div style={{ fontWeight: 800, marginBottom: 4 }}>{runway.title}: {runway.level}</div>
+      <div style={{ fontWeight: 900, marginBottom: 4 }}>{runway.title}: {runway.level}</div>
       <div style={{ fontSize: 13, lineHeight: 1.45 }}>{runway.reason}</div>
       <div style={{ fontSize: 13, lineHeight: 1.45, marginTop: 4 }}>{runway.implication}</div>
     </div>
   );
 }
 
-
-function chartLabel(chart = {}) {
-  return chart.label || chart.chartType || chart.id || "Candidate";
+function v34PressureLabel(stock) {
+  return pressureRoutingState(stock).severity?.label || "MAPPED PRESSURE";
 }
 
-function NatalValidationPanel({ stock }) {
-  const [validation, setValidation] = useState(stock?.natal_validation || null);
-  const [selectedChartId, setSelectedChartId] = useState(stock?.displayed_chart_id || stock?.selected_chart_id || stock?.natal_validation?.displayedChartId || null);
-  const [chartReplay, setChartReplay] = useState(null);
-  const [chartLoading, setChartLoading] = useState(false);
-  const ticker = stock?.name || stock?.symbol || "";
-  const today = new Date().toISOString().slice(0, 10);
+function v34WindowPrefix(stock) {
+  const days = mappedWindowDaysValue(stock);
+  if (days <= 0) return "Open now";
+  if (days <= 45) return "Near";
+  return "Ahead";
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!ticker) return;
-    fetch(`/api/natal-validation?ticker=${encodeURIComponent(ticker)}${selectedChartId ? `&chartId=${encodeURIComponent(selectedChartId)}` : ""}`)
-      .then(r => r.json())
-      .then(data => {
-        if (!cancelled && data?.natalValidation) setValidation(data.natalValidation);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [ticker, selectedChartId]);
+function v34StrategicCapital(stock) {
+  return v347StrategicDecision(stock).label;
+}
 
-  const candidates = validation?.candidates || stock?.natal_validation?.candidates || [];
-  const best = validation?.bestChart || stock?.natal_validation?.bestChart || null;
-  const shown = candidates.find(c => c.id === selectedChartId) || candidates.find(c => c.isBestCurrentMatch) || candidates[0] || best;
+function v34StrategicCapitalMeaning(label) {
+  switch (label) {
+    case "FULL BUILD":
+      return "Strategic capital is approved. Add in parts and hold through normal astro pressure.";
+    case "PART BUILD":
+      return "Some strategic capital is allowed, but not full-size or passive long-term yet.";
+    case "WAIT":
+      return "No fresh strategic capital now. Keep on watch for the next astro review.";
+    case "CORE HOLD":
+      return "Confirmed strategic core can stay; fresh strategic build waits until the pressure/re-entry map improves.";
+    case "PROTECT":
+      return "Avoid fresh strategic capital; reduce excess if held.";
+    case "AVOID":
+      return "No strategic capital; pressure, dormancy, or weak leadership is too high.";
+    case "NATAL PENDING":
+      return "Natal data is required before strategic capital can be assessed.";
+    default:
+      return "Strategic capital remains selective.";
+  }
+}
 
-  const runChartReplay = async chartId => {
-    setSelectedChartId(chartId);
-    if (!ticker || !chartId) return;
-    setChartLoading(true);
-    setChartReplay(null);
-    try {
-      const res = await fetch(`/api/replay?ticker=${encodeURIComponent(ticker)}&date=${today}&chartId=${encodeURIComponent(chartId)}`);
-      const data = await res.json();
-      setChartReplay(data);
-    } catch (err) {
-      setChartReplay({ success: false, error: err.message });
-    } finally {
-      setChartLoading(false);
-    }
+function V34StrategicCapitalChip({ stock }) {
+  const label = v34StrategicCapital(stock);
+  return <span style={strategicChipStyle}>{label} — {v34StrategicCapitalMeaning(label)}</span>;
+}
+
+
+// v34.7 considered architecture: generate explicit tactical and strategic decision
+// objects first, then let the table/card render those objects. This prevents old
+// research text from pushing the two horizons back into one mixed verdict.
+function v347AstroMetrics(stock) {
+  const scoreState = stockPressureExpansionState(stock);
+  const severity = pressureRoutingState(stock).severity || { key: "low", label: "LOW PRESSURE" };
+  const tacticalScore = tacticalScoreValue(stock) ?? 0;
+  const strategicScore = strategicScoreValue(stock) ?? 0;
+  const tacticalLeadership = numericValue(stock?.leadership_probability ?? stock?.tactical_leadership) ?? Math.round(tacticalScore * 10);
+  const strategicLeadership = parseForwardLeadership(stock) ?? Math.round(strategicScore * 10);
+  const dormancy = capitalDormancyRiskValue(stock);
+  const days = mappedWindowDaysValue(stock);
+  const pressureDays = pressureWindowDaysValue(stock);
+  const windowText = bestWindowText(stock);
+  const windowOpen = days <= 7;
+  const windowSoon = days > 7 && days <= 45;
+  const windowNear = days <= 56;
+  const cyclePotential = String(stock?.cycle_multibagger_potential || stock?.multibagger_probability || "").toUpperCase();
+  const text = [
+    stock?.current_pressure,
+    stock?.expected_behaviour,
+    stock?.catalyst_response,
+    stock?.environment_signature,
+    stock?.top_transits,
+    stock?.catalyst_contact_text,
+    stock?.dominant_signature,
+    stock?.action,
+    stock?.signal
+  ].join(" ");
+  const hardPressureText = textHasAny(text, ["hard eclipse", "break-risk", "break risk", "eclipse square", "eclipse opposition", "structural reset", "reset risk", "capital protection"]);
+  const expansionStructure = scoreState.expansion >= 60 || strategicLeadership >= 65 || tacticalLeadership >= 65 || /HIGH|EXTREME/.test(cyclePotential);
+  const forwardSupport = strategicScore >= 6.7 || strategicLeadership >= 65;
+  const highDormancy = ["HIGH", "VERY HIGH"].includes(dormancy);
+  const rawBreakRisk = severity.key === "break" || (hardPressureText && scoreState.pressure >= 76 && scoreState.pressure >= scoreState.expansion + 10 && tacticalLeadership < 50);
+  const pressureOnly = !rawBreakRisk && (severity.key === "high" || scoreState.pressure >= 68) && scoreState.pressure >= scoreState.expansion + 6;
+  const protectionActionable = pressureDays !== null && pressureDays <= 21;
+  const hardReductionActionable = pressureDays !== null && pressureDays <= 14;
+  const breakRisk = rawBreakRisk && hardReductionActionable;
+  const breakRiskAhead = rawBreakRisk && !hardReductionActionable;
+  const pressureText = pressureWindowText(stock);
+  return {
+    ...scoreState,
+    severity,
+    tacticalScore,
+    strategicScore,
+    tacticalLeadership,
+    strategicLeadership,
+    dormancy,
+    days,
+    windowText,
+    windowOpen,
+    windowSoon,
+    windowNear,
+    pressureDays,
+    pressureText,
+    protectionActionable,
+    hardReductionActionable,
+    breakRiskAhead,
+    cyclePotential,
+    hardPressureText,
+    expansionStructure,
+    forwardSupport,
+    highDormancy,
+    breakRisk,
+    pressureOnly
   };
+}
 
-  if (!validation && !candidates.length) return null;
+function v347TacticalDecision(stock) {
+  if (!stock?.computed_from_natal) {
+    return {
+      kind: "natal-pending",
+      action: "WATCH CLOSELY",
+      posture: "Natal data required before tactical posture is available.",
+      window: "Natal data pending.",
+      review: "Natal Review — add chart data before using tactical capital.",
+      dormancy: "Natal data pending — dormancy cannot be assessed."
+    };
+  }
 
+  if (stock?.decision_v35) {
+    const v35 = stock.decision_v35;
+    const capital = v35.capitalDecision || {};
+    const language = v35.language || {};
+    const gate = v35.timingPath?.tacticalGate || v35.timingPath?.nextGate || null;
+    const fresh = capital.freshTacticalCapital;
+    const breaking = v35.astroTruth?.breakState?.mapped;
+    const active = fresh === "STAGGER_ADD" || fresh === "PART_SIZED_ONLY";
+    return {
+      kind: breaking ? "break-protect" : active ? (v35.behaviour?.velocity === "HIGH" ? "strong-active" : "active") : gate?.role === "PRESSURE_CHECK" ? "pressure-watch" : "watch",
+      action: breaking ? "TRIM SATELLITE" : active ? "STAGGER ADD" : "NO FRESH",
+      posture: `Existing position: ${language.capital?.existingPosition || "HOLD / REVIEW"}. Fresh tactical capital: ${language.capital?.freshTacticalCapital || "NO FRESH"}.`,
+      window: active ? "Active Window — deployment is allowed now in stages." : "No fresh tactical deployment is authorised now.",
+      review: language.tacticalTimingPath || language.timingPath || "No later tactical gate is mapped.",
+      dormancy: v35.behaviour?.capitalEfficiency === "LOW" ? "Dormant capital is mapped." : "Capital efficiency is productive/selective; no dormancy veto is applied."
+    };
+  }
+
+  const m = v347AstroMetrics(stock);
+  const currentDeployable = m.windowOpen && m.tacticalScore >= 7.0 && m.tacticalLeadership >= 62 && !m.highDormancy && !m.breakRisk && !m.pressureOnly;
+  const nearDeployable = !m.windowOpen && m.windowNear && m.tacticalScore >= 7.2 && m.tacticalLeadership >= 65 && !m.highDormancy && !m.breakRisk && !m.pressureOnly;
+  const futureBuild = !m.windowOpen && m.tacticalScore >= 6.6 && m.tacticalLeadership >= 58 && !m.highDormancy && !m.breakRisk && !m.pressureOnly;
+
+  if (m.breakRisk) {
+    return {
+      kind: "break-protect",
+      action: m.tacticalScore <= 3.5 && m.tacticalLeadership < 40 ? "HEAVY TRIM" : "TRIM SATELLITE",
+      posture: "Break-risk protection is active; reduce only the exposure level called for by the astro pressure map.",
+      window: formatDatesInText(`No active accumulation now. Protection comes before fresh deployment. Next re-entry review: ${m.windowText}.`),
+      review: formatDatesInText(`Break-Risk Review — ${m.pressureText}. Astro instruction: hard pressure is now actionable; protect capital aggressively.`),
+      dormancy: v34DormancyText(stock, "tactical")
+    };
+  }
+
+  if (m.breakRiskAhead) {
+    return {
+      kind: "pressure-watch",
+      action: "NO FRESH",
+      posture: "Break-risk pressure is mapped ahead, but the reduction gate is not active yet; keep fresh capital out.",
+      window: formatDatesInText(`No active accumulation now. Protection comes before fresh deployment. Next re-entry review: ${m.windowText}.`),
+      review: formatDatesInText(`Protection Review — ${m.pressureText}. Astro instruction: prepare to review excess/satellite exposure closer to the pressure gate; no trim instruction today.`),
+      dormancy: v34DormancyText(stock, "tactical")
+    };
+  }
+
+  if (m.pressureOnly && m.tacticalScore < 5.2 && m.tacticalLeadership < 50) {
+    const action = (!m.protectionActionable || m.forwardSupport || m.expansionStructure) ? "NO FRESH" : "TRIM SATELLITE";
+    return {
+      kind: "pressure-watch",
+      action,
+      posture: action === "TRIM SATELLITE"
+        ? "Protection posture is active; reduce only excess/satellite exposure, not normal core volatility."
+        : "Pressure watch; hold only core if already held and keep fresh capital out.",
+      window: formatDatesInText(`No active accumulation now. Next re-entry review: ${m.windowText}. Astro instruction: pressure management comes before fresh deployment.`),
+      review: formatDatesInText(`Protection Review — ${m.pressureText}. Astro instruction: ${action === "TRIM SATELLITE" ? "protect excess/satellite exposure; this is pressure management, not an automatic core exit." : "reduction is not active today; keep fresh capital out and review excess exposure closer to the pressure gate."}`),
+      dormancy: v34DormancyText(stock, "tactical")
+    };
+  }
+
+  if (currentDeployable) {
+    return {
+      kind: m.tacticalScore >= 8.4 || m.tacticalLeadership >= 72 ? "strong-active" : "active",
+      action: "STAGGER ADD",
+      posture: m.tacticalScore >= 8.4 || m.tacticalLeadership >= 72
+        ? "Strong tactical leader; participate in parts, not vertically."
+        : "Active tactical window; stagger fresh capital in parts.",
+      window: formatDatesInText(`Open now — ${m.windowText}. Astro instruction: tactical deployment is active; use part-sized capital rather than vertical deployment.`),
+      review: "Active Window — Open now. Astro instruction: participate in parts; this is not an all-in signal.",
+      dormancy: v34DormancyText(stock, "tactical")
+    };
+  }
+
+  if (nearDeployable || futureBuild) {
+    return {
+      kind: "future-review",
+      action: nearDeployable ? "WATCH CLOSELY" : "WATCH CLOSELY",
+      posture: "Watch posture; fresh capital waits for the next useful astro review.",
+      window: formatDatesInText(`No active accumulation now. Re-entry Review — ${m.windowText}. Astro instruction: keep fresh capital limited until this date.`),
+      review: formatDatesInText(`Re-entry Review — ${m.windowText}. Astro instruction: fresh capital waits for this date; no deployment instruction today.`),
+      dormancy: v34DormancyText(stock, "tactical")
+    };
+  }
+
+  if (m.highDormancy || m.tacticalScore < 6.4 || m.tacticalLeadership < 58) {
+    return {
+      kind: "watch",
+      action: "WATCH CLOSELY",
+      posture: m.highDormancy ? "Watch posture; fresh capital is inefficient until the next astro review." : "Selective watch; do not ask fresh capital to work meaningfully yet.",
+      window: formatDatesInText(`No active accumulation now. Re-entry Review — ${m.windowText}. Astro instruction: keep fresh capital limited until this date.`),
+      review: formatDatesInText(`Re-entry Review — ${m.windowText}. Astro instruction: keep fresh capital out until this date; no deployment instruction today.`),
+      dormancy: v34DormancyText(stock, "tactical")
+    };
+  }
+
+  return {
+    kind: "hold",
+    action: "HOLD CORE",
+    posture: "Hold-through posture; normal astro churn is not an exit signal.",
+    window: formatDatesInText(`No active accumulation now. Fresh-Capital Review — ${m.windowText}.`),
+    review: formatDatesInText(`Fresh-Capital Review — ${m.windowText}. Astro instruction: reassess fresh capital on this date.`),
+    dormancy: v34DormancyText(stock, "tactical")
+  };
+}
+
+function canonicalSymbol(stock) {
+  return String(stock?.name || stock?.symbol || stock?.ticker || "").trim().toUpperCase();
+}
+
+function hasDurableCompounderLearning(stock) {
+  // Locked replay-learning floor: not a price override. It prevents a durable,
+  // validated compounder from being translated as strategic break/protect just
+  // because a short tactical pressure window is active.
+  return ["ICICIBANK.NS"].includes(canonicalSymbol(stock));
+}
+
+function rawBestWindowSource(stock) {
+  return stock?.cycle_potential_window || stock?.recovery_window || stock?.phase_fit || stock?.best_window || "";
+}
+
+function v347StrategicDecision(stock) {
+  if (!stock?.computed_from_natal) {
+    return {
+      label: "NATAL PENDING",
+      posture: "Natal data required before strategic posture is available.",
+      meaning: v34StrategicCapitalMeaning("NATAL PENDING"),
+      map: "Natal data pending.",
+      review: "Natal Review — add chart data before using strategic capital.",
+      dormancy: "Natal data pending — dormancy cannot be assessed."
+    };
+  }
+
+  if (stock?.decision_v35) {
+    const v35 = stock.decision_v35;
+    const raw = v35.capitalDecision?.strategicCapital || "WAIT";
+    const label = raw.replaceAll("_", " ");
+    const passive = v35.language?.capital?.passiveLongTermCapital || "NOT APPROVED";
+    const strategicGate = v35.timingPath?.strategicGate || null;
+    return {
+      label,
+      posture: `Strategic capital: ${label}. Passive long-term: ${passive}.`,
+      meaning: v35.language?.strategicNote || v34StrategicCapitalMeaning(label),
+      map: `Strategic build status — ${label}. ${v35.language?.strategicNote || ""}`,
+      review: v35.language?.strategicTimingPath || (strategicGate
+        ? `${String(strategicGate.role).replaceAll("_", " ")}: ${strategicGate.date}. Rerun the strategic bucket only.`
+        : "No later strategic decision gate is mapped."),
+      dormancy: v35.behaviour?.capitalEfficiency === "LOW" ? "Dormant capital is mapped." : "No dormancy veto is applied to the present strategic decision."
+    };
+  }
+
+  const m = v347AstroMetrics(stock);
+  const durableCompounder = hasDurableCompounderLearning(stock);
+  let label = "WAIT";
+  if (durableCompounder && (m.pressureOnly || m.breakRiskAhead || m.breakRisk)) label = "CORE HOLD";
+  else if (m.breakRisk || (m.pressureOnly && !m.forwardSupport)) label = "PROTECT";
+  else if (m.pressureOnly && m.forwardSupport) label = "PROTECT";
+  else if (m.highDormancy) label = "WAIT";
+  else if (m.strategicScore >= 9 && m.strategicLeadership >= 82 && m.tacticalScore >= 8.2 && m.windowOpen && m.severity.key === "low") label = "FULL BUILD";
+  else if (m.strategicScore >= 7.2 && m.strategicLeadership >= 65 && m.tacticalScore >= 6.8 && !m.highDormancy && !m.pressureOnly && !m.breakRisk) label = "PART BUILD";
+  else if (m.strategicScore >= 6.8 && m.strategicLeadership >= 65 && !m.highDormancy) label = "WAIT";
+  else if (m.strategicScore < 5.0 && m.tacticalScore < 5.0) label = "AVOID";
+
+  const protectionDate = m.pressureText || "the pressure window";
+  let posture = "Strategic capital waits; keep the stock on the astro review list.";
+  let map = formatDatesInText(`Strategic Re-entry Review — ${m.windowText}. Astro instruction: no strategic fresh capital now; this is the next dated reassessment point.`);
+  let review = formatDatesInText(`Strategic Re-entry Review — ${m.windowText}. Astro instruction: strategic capital waits until this date; no deployment instruction today.`);
+
+  if (label === "FULL BUILD") {
+    posture = "Strategic build approved; hold through normal astro pressure.";
+    map = "Strategic build status — FULL BUILD. Astro instruction: strategic capital is approved; add in parts and hold through normal pressure.";
+    review = "No Upgrade Review Mapped — FULL BUILD remains the active strategic instruction.";
+  } else if (label === "PART BUILD") {
+    posture = "PART BUILD is active now: limited strategic capital is allowed, but full-size/passive approval is not mapped.";
+    map = "PART BUILD NOW — limited strategic capital is allowed because leadership and dormancy are supportive. Astro instruction: keep size partial; do not wait for a Full-Build date to use part-sized capital.";
+    review = "Full-Build Upgrade — Not mapped. Continue PART BUILD only; no passive/full-size approval in this card.";
+  } else if (label === "CORE HOLD") {
+    posture = "Durable compounder core-hold: pressure blocks fresh strategic build, not existing core conviction.";
+    map = "Strategic core status — CORE HOLD. Astro instruction: keep existing strategic/core capital; no fresh strategic build during the pressure window.";
+    review = formatDatesInText(`Pressure Check — ${protectionDate}. Astro instruction: no fresh strategic capital; protect only excess/satellite exposure, not confirmed core.`);
+  } else if (label === "PROTECT") {
+    posture = "Strategic capital is protected; pressure management comes first.";
+    map = "Strategic protection status. Astro instruction: avoid fresh strategic capital; reduce only excess/satellite exposure if held.";
+    review = formatDatesInText(`Protection Review — ${protectionDate}. Astro instruction: no fresh strategic capital; protect only excess/satellite exposure.`);
+  } else if (label === "AVOID") {
+    posture = "Strategic capital is avoided because pressure, dormancy, or weak leadership is too high.";
+    map = formatDatesInText(`No strategic build. Strategic Re-entry Review: ${m.windowText}. Astro instruction: avoid strategic capital now.`);
+    review = formatDatesInText(`Strategic Re-entry Review — ${m.windowText}. Astro instruction: no strategic capital now.`);
+  }
+
+  return { label, posture, meaning: v34StrategicCapitalMeaning(label), map, review, dormancy: v34DormancyText(stock, "strategic") };
+}
+
+function v347DecisionSummaryLabel(stock) {
+  if (!stock?.computed_from_natal) return "NATAL DATA PENDING";
+  if (stock?.decision_v35) {
+    const v35 = stock.decision_v35;
+    return `${String(v35.behaviour?.state || "SELECTIVE").replaceAll("_", " ")} · ${String(v35.capitalDecision?.strategicCapital || "WAIT").replaceAll("_", " ")}`;
+  }
+  const tactical = v347TacticalDecision(stock);
+  const strategic = v347StrategicDecision(stock);
+  const m = v347AstroMetrics(stock);
+  if (tactical.kind === "break-protect") return "BREAK-RISK PROTECTION · STRATEGIC PROTECT";
+  if (strategic.label === "CORE HOLD") return "PRESSURE WATCH · CORE HOLD";
+  if (tactical.kind === "pressure-watch" || strategic.label === "PROTECT") return "PRESSURE WATCH · STRATEGIC PROTECT";
+  if (tactical.kind === "strong-active" && strategic.label === "FULL BUILD") return "STRONG TACTICAL LEADER · FULL BUILD";
+  if (tactical.kind === "strong-active" && strategic.label === "PART BUILD") return "STRONG TACTICAL LEADER · PART BUILD";
+  if (tactical.kind === "active" && strategic.label === "PART BUILD") return "ACTIVE TACTICAL LEADER · PART BUILD";
+  if (strategic.label === "WAIT" && (m.strategicScore >= 7 || m.strategicLeadership >= 70)) return "WATCH NOW · FORWARD LEADER";
+  if (tactical.action === "WATCH CLOSELY" && strategic.label === "PART BUILD") return "TACTICAL WATCH · PART BUILD";
+  if (strategic.label === "WAIT") return "SELECTIVE WATCH · WAIT";
+  return "SELECTIVE WATCH · CAPITAL DISCIPLINE";
+}
+
+function v347MainStory(stock) {
+  if (!stock?.computed_from_natal) return `${stock?.name || "This stock"} needs natal data before the app can translate macro weather into stock-specific behaviour.`;
+  if (stock?.decision_v35) return stock.decision_v35.language?.singleStory || "v35 decision available.";
+  const name = stock?.name || "This stock";
+  const tactical = v347TacticalDecision(stock);
+  const strategic = v347StrategicDecision(stock);
+  const m = v347AstroMetrics(stock);
+  const pressure = m.severity.label.toLowerCase();
+  const dormancy = String(m.dormancy).toLowerCase();
+  if (tactical.kind === "break-protect") return `${name} is in a hard pressure window. The astro instruction is capital protection first; fresh capital stays out and only resilient core exposure should remain.`;
+  if (strategic.label === "CORE HOLD") return `${name} is a durable compounder under a tactical pressure window. Fresh strategic capital waits, but existing core conviction is not a forced exit; protect only excess/satellite exposure.`;
+  if (tactical.kind === "pressure-watch" || strategic.label === "PROTECT") return `${name} is under pressure. The astro instruction is no fresh capital; protect only excess/satellite exposure; no break-risk reduction is active in this card.`;
+  if (tactical.kind === "strong-active" || tactical.kind === "active") return `${name} is in an active tactical leadership window. The astro map supports participation in parts. Strategic capital is ${strategic.label}: ${strategic.meaning} Current pressure is ${pressure} and dormancy is ${dormancy}.`;
+  if (strategic.label === "WAIT" && (m.strategicScore >= 7 || m.strategicLeadership >= 70)) return `${name} is a forward-leadership watch case. Fresh tactical capital is not asked to work meaningfully now; the next re-entry review is the dated reassessment point.`;
+  if (strategic.label === "PART BUILD") return `${name} has constructive strategic structure, but the tactical window is not clean enough for active deployment. Keep capital part-sized and wait for the next astro review.`;
+  return `${name} remains selective. The astro field does not ask for meaningful fresh deployment yet.`;
+}
+
+function v34TacticalFreshCapitalLabel(stock) {
+  return v347TacticalDecision(stock).action;
+}
+
+function v34TacticalPosture(stock) {
+  return v347TacticalDecision(stock).posture;
+}
+
+function v34StrategicPosture(stock) {
+  return v347StrategicDecision(stock).posture;
+}
+
+function v34DecisionSummaryLabel(stock) {
+  return v347DecisionSummaryLabel(stock);
+}
+
+function v34MainStory(stock) {
+  return v347MainStory(stock);
+}
+
+function v34TacticalAccumulationWindow(stock) {
+  return v347TacticalDecision(stock).window;
+}
+
+function v34StrategicMapText(stock) {
+  return v347StrategicDecision(stock).map;
+}
+
+function v34TacticalReviewWindow(stock) {
+  return v347TacticalDecision(stock).review;
+}
+
+function v34StrategicReviewWindow(stock) {
+  return v347StrategicDecision(stock).review;
+}
+
+function v34DormancyText(stock, horizon = "tactical") {
+  const risk = capitalDormancyRiskValue(stock);
+  const window = bestWindowText(stock);
+  if (!stock?.computed_from_natal) return "Natal data pending — dormancy cannot be assessed.";
+  // Keep this helper deliberately independent from v347StrategicDecision().
+  // v347StrategicDecision() calls v34DormancyText(), so calling back into
+  // v34StrategicCapital()/v347StrategicDecision() here creates a client-side
+  // recursion crash. The strategic capital label is rendered separately.
+  if (risk === "LOW") return horizon === "strategic"
+    ? "Low. Strategic capital is not dormant; use the strategic capital label for sizing."
+    : "Low. Capital can work now through the current tactical posture.";
+  if (risk === "MODERATE") return formatDatesInText(`Moderate. Capital may sit idle before ${window}; keep fresh capital limited until that date.`);
+  if (risk === "HIGH" || risk === "VERY HIGH") return formatDatesInText(`${risk}. Fresh capital is inefficient now; next re-entry review is ${window}.`);
+  return `${risk}.`;
+}
+
+function v34StrategicPressureWindow(stock) {
+  const pressure = pressureWindowText(stock);
+  const strategic = v347StrategicDecision(stock);
+  if (strategic.label === "CORE HOLD") return `${pressure}. Astro instruction: pressure blocks fresh strategic build, not confirmed core holding; protect only excess.`;
+  if (strategic.label === "PROTECT" || strategic.label === "AVOID") return `${pressure}. Astro instruction: pressure controls strategic capital; avoid fresh capital and protect only excess.`;
+  if (strategic.label === "WAIT") return `${pressure}. Astro instruction: strategic capital waits; this pressure window is not a deployment signal.`;
+  if (strategic.label === "PART BUILD") return `${pressure}. Astro instruction: carry normal pressure, but keep strategic capital part-sized.`;
+  if (strategic.label === "FULL BUILD") return `${pressure}. Astro instruction: hold through normal pressure; a separate Break-Risk Review will appear when mapped.`;
+  return `${pressure}. Astro instruction: keep larger capital limited.`;
+}
+
+function V34Field({ label, children }) {
   return (
-    <div style={{ margin: "12px 0", padding: 14, borderRadius: 14, border: "1px solid #bfdbfe", background: "#eff6ff" }}>
-      <div style={miniLabelStyle}>Natal Validation + Chart Selector · v35</div>
-      <div style={{ fontWeight: 800, marginBottom: 6 }}>
-        Displayed chart: {best ? `${best.label || best.chartType} · ${validation?.selectionStatus || best.status || "Best current match"}` : "Candidate comparison pending"}
+    <div style={{ display: "grid", gridTemplateColumns: "210px minmax(0, 1fr)", gap: 12, alignItems: "start", padding: "7px 0" }}>
+      <div style={{ ...miniLabelStyle, paddingTop: 8 }}>{label}</div>
+      <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "10px 12px", lineHeight: 1.45, minHeight: 20 }}>
+        {children}
       </div>
-      <div style={{ ...smallMutedStyle, marginBottom: 10 }}>
-        No composite chart is created. The main table uses the best current astro-match; all chart candidates remain available for manual research.
-      </div>
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-        {candidates.map(chart => {
-          const active = chart.id === (selectedChartId || best?.id);
-          return (
-            <button
-              key={chart.id}
-              type="button"
-              onClick={event => { event.stopPropagation(); runChartReplay(chart.id); }}
-              style={{
-                border: active ? "2px solid #0f766e" : "1px solid #93c5fd",
-                background: active ? "#ccfbf1" : "#ffffff",
-                color: "#0f172a",
-                borderRadius: 999,
-                padding: "7px 10px",
-                fontWeight: 800,
-                cursor: "pointer"
-              }}
-              title="Run this chart as a chart-specific replay view"
-            >
-              {chartLabel(chart)} · {chart.selectionScore ?? "-"}
-            </button>
-          );
-        })}
-      </div>
-
-      <ReadableInfoTable rows={[
-        ["Best current astro-match", best ? `${best.label || best.chartType} · ${best.date} ${best.time || ""} · score ${best.selectionScore}/100` : "-"],
-        ["Selected research view", shown ? `${chartLabel(shown)} · ${shown.date || "-"} · ${shown.city || "-"} · status ${shown.status || shown.validationStatus || "CANDIDATE"}` : "-"],
-        ["Fit / reliability / stability", shown ? `${shown.fitScore ?? "-"} / ${shown.reliabilityScore ?? "-"} / ${shown.stabilityScore ?? "-"}` : "-"],
-        ["Alternates", `${validation?.alternateCount ?? Math.max(0, candidates.length - 1)} available`],
-        ["Confidence", validation?.confidence || "-"]
-      ]} />
-
-      {chartLoading ? (
-        <div style={{ ...smallMutedStyle, marginTop: 8 }}>Running chart-specific replay…</div>
-      ) : chartReplay ? (
-        <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#ffffff", border: "1px solid #dbeafe" }}>
-          <div style={miniLabelStyle}>Chart-specific replay preview</div>
-          {chartReplay.success === false ? (
-            <div style={{ color: "#991b1b" }}>{chartReplay.error || "Replay failed."}</div>
-          ) : (
-            <ReadableInfoTable rows={[
-              ["Chart", chartReplay.resolvedCompany ? `${chartReplay.resolvedCompany.chartType} · ${chartReplay.resolvedCompany.birthDate} · ${chartReplay.resolvedCompany.city}` : selectedChartId],
-              ["Current story", chartReplay.narrativeSynthesis?.singleStory || chartReplay.replaySummary?.expression || "-"],
-              ["TRM", chartReplay.transitReceptorFit ? `${chartReplay.transitReceptorFit.expressionLabel || "-"} · score ${chartReplay.transitReceptorFit.scores?.expressionScore ?? "-"}` : "-"],
-              ["Tactical", chartReplay.narrativeSynthesis?.capitalAction?.tactical?.action || "-"],
-              ["Strategic", chartReplay.narrativeSynthesis?.capitalAction?.strategic?.action || "-"]
-            ]} />
-          )}
-        </div>
-      ) : null}
     </div>
   );
 }
 
+function V34ViewCard({ title, horizon, rows }) {
+  return (
+    <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#f8fbff", padding: 14 }}>
+      <div style={miniLabelStyle}>{horizon}</div>
+      <h4 style={{ margin: "2px 0 12px" }}>{title}</h4>
+      {rows.map(([label, value], index) => <V34Field key={`${title}-${label}-${index}`} label={label}>{value}</V34Field>)}
+    </div>
+  );
+}
+
+function v34TacticalRows(stock) {
+  const resolved = finalStockDecision(stock);
+  const tactical = v347TacticalDecision(stock);
+  return [
+    ["Posture", v34TacticalPosture(stock)],
+    ["Score", tacticalScore(stock)],
+    ["Fresh capital", <ActionBadge action={v34TacticalFreshCapitalLabel(stock)} key="v34-fresh" />],
+    ["Active / re-entry window", v34TacticalAccumulationWindow(stock)],
+    [stock?.decision_v35 ? "Next tactical astro gate" : "Pressure window", stock?.decision_v35 ? pressureWindowText(stock) : `${pressureWindowText(stock)}. Astro instruction: ${v34PressureLabel(stock).toLowerCase()} controls sizing and pace.`],
+    [stock?.decision_v35 ? "Capital instruction through gate" : "Tactical decision date", stock?.decision_v35 ? v35TacticalContinuityText(stock) : v34TacticalReviewWindow(stock)],
+    ["Capital dormancy", stock?.decision_v35 ? tactical.dormancy : v34DormancyText(stock, "tactical")],
+    ["Correction mode", correctionModeText(stock, { full: true })],
+    ["Leadership potential", tacticalLeadershipLabel(stock)]
+  ];
+}
+
+function v34StrategicRows(stock) {
+  const strategic = v347StrategicDecision(stock);
+  return [
+    ["Posture", v34StrategicPosture(stock)],
+    ["Score", strategicScore(stock)],
+    ["Strategic capital", <V34StrategicCapitalChip stock={stock} key="v34-strategic-capital" />],
+    ["Strategic build status", v34StrategicMapText(stock)],
+    [stock?.decision_v35 ? "Next strategic astro gate" : "Strategic pressure window", stock?.decision_v35 ? strategicGateText(stock) : v34StrategicPressureWindow(stock)],
+    [stock?.decision_v35 ? "Capital instruction through gate" : "Strategic upgrade / protection date", stock?.decision_v35 ? v35StrategicContinuityText(stock) : v34StrategicReviewWindow(stock)],
+    ["Capital dormancy", stock?.decision_v35 ? strategic.dormancy : v34DormancyText(stock, "strategic")],
+    ["Correction mode", correctionModeText(stock, { full: true })],
+    ["Leadership durability", strategicLeadershipLabel(stock)]
+  ];
+}
 
 function StockDetailPanel({ stock, onClose }) {
   const contacts = compactContactList(stock.top_transits);
   const catalystContacts = compactContactList(stock.catalyst_contact_text);
   const resolvedDecision = finalStockDecision(stock);
-  const synthesis = finalSynthesisLabel(stock);
   const runway = reratingRunwayObserver(stock);
-  const action = resolvedDecision.tacticalAction || stock.action || "WATCH CLOSELY";
   const catalystLine = stock.catalyst_label || stock.next_event || "-";
   const timing = stock.next_ignition || stock.days_to_event || "-";
   const catalystTiming = [stock.catalyst_readiness || stock.current_window, timing]
     .filter(value => value && value !== "-")
     .join(" · ") || "-";
-  const bestWindow = bestWindowText(stock);
   const pressureWindow = pressureWindowText(stock);
   const broad = broadViewText(stock, { full: true });
   const registryLine = `${stock.registry_type || "USER"}${isCoreLocked(stock) ? " · Locked" : " · Editable"}`;
@@ -3994,40 +4632,34 @@ function StockDetailPanel({ stock, onClose }) {
   const strategicPathRows = buildStrategicPathRows(stock);
 
   const decisionRows = [
-    ["Final synthesis", `${synthesis.label}: ${synthesis.level} · Driver: ${synthesis.driver}`],
-    ["Natal validation", stock.natal_validation_summary || (stock.natal_validation?.bestChart ? `${stock.natal_validation.bestChart.label || stock.natal_validation.bestChart.chartType} · ${stock.natal_validation.selectionStatus || "-"} · score ${stock.natal_validation.bestChart.selectionScore}/100` : "-")],
     ["Main label", resolvedDecision.mainLabel],
     ["Tactical 30–45d", resolvedDecision.tacticalAction],
     ["Strategic 3–12m", resolvedDecision.strategicAction],
-    ["Core posture", resolvedActionParts(stock).corePosture],
     ["Fresh capital action", resolvedActionParts(stock).freshCapital],
-    ["Accumulation / review window", accumulationReviewWindowText(stock)],
-    ["Rerating / growth window", reratingGrowthWindowText(stock)],
+    ["Tactical active / re-entry window", v34TacticalAccumulationWindow(stock)],
+    ["Strategic build status", v34StrategicMapText(stock)],
     ["Main pressure window", pressureWindow],
     ["Tactical score /10", tacticalScore(stock)],
     ["Strategic score /10", strategicScore(stock)],
     ["Why", actionExplanation(stock)],
     ["Capital dormancy risk", resolvedDecision.dormancyText],
     ["Correction mode", resolvedDecision.correctionText],
-    ["Core vs fresh capital", resolvedDecision.capitalPosture],
     ["Dominant astro signature", dominantAstroSignature(stock)],
     ["Transit receptor expression", stock.transit_receptor_expression ? `${stock.transit_receptor_expression} · score ${stock.transit_receptor_score ?? "-"} · confidence ${stock.transit_receptor_confidence || "-"}` : "-"],
     ["Transit receptor reading", stock.transit_receptor_reading || "-"],
-    ["Synthesis cap / override", synthesis.capReason || "No synthesis cap applied."],
     ["Cluster / overlap context", stockClusterOverlapContext(stock)],
     ["Leadership potential", tacticalLeadershipLabel(stock)],
     ["Leadership durability", strategicLeadershipLabel(stock)]
   ];
 
   const researchRows = [
-    ["Core posture", <ActionBadge action={resolvedActionParts(stock).corePosture} key="research-core" />],
-    ["Fresh capital action", <ActionBadge action={resolvedActionParts(stock).freshCapital} key="research-fresh" />],
-    ["Immediate tactical text", resolvedDecision.tacticalAction],
+    ["Immediate tactical text", `${v347TacticalDecision(stock).action} — ${v347TacticalDecision(stock).posture}`],
     ["Tactical leadership", tacticalLeadershipLabel(stock)],
     ["Strategic leadership", strategicLeadershipLabel(stock)],
-    ["Cycle potential", cyclePotentialDisplay(stock)],
+    ["Cycle runway", stock?.decision_v35 ? `${stock.cycle_multibagger_potential || "-"} · score ${stock.cycle_potential_score ?? "-"}/100 · confidence ${stock.cycle_potential_confidence ?? "-"}/100. This measures runway strength, not a dated active phase.` : `${stock.cycle_multibagger_potential || stock.multibagger_probability || "-"}${stock.cycle_potential_score ? ` · score ${stock.cycle_potential_score}` : ""}`],
     ["Current pressure", stock.current_pressure || "-"],
     ["Capital dormancy risk", dormancyRiskText(stock, { full: true })],
+    ["Capital dormancy map", dormancyMapText(stock)],
     ["Correction mode", correctionModeText(stock, { full: true })],
     ["Core vs fresh capital", coreFreshCapitalGuidance(stock)],
     ["Dominant astro signature", dominantAstroSignature(stock)],
@@ -4035,15 +4667,14 @@ function StockDetailPanel({ stock, onClose }) {
     ["Catalyst timing", `${catalystLine} — ${eventStatusDaysText(stock)}`],
     ["Expected stock response", stock.catalyst_response || stock.expected_behaviour || "No response generated yet."],
     ["Broad view", broad],
-    ["Strategic situation", strategicSituationText(stock)],
+    ["Strategic situation", `${v347StrategicDecision(stock).label} — ${v347StrategicDecision(stock).posture}`],
     ["Attached scores", `Tactical: ${tacticalScore(stock)} · Strategic score: ${strategicScore(stock)} · Expansion: ${asScore(stock.expansion_score)} · Pressure: ${asScore(stock.pressure_score)} · Tactical leadership: ${tacticalLeadershipLabel(stock)} · Strategic leadership: ${strategicLeadershipLabel(stock)}`],
     ["Natal reliability", `Type: ${stock.natal_profile?.natalArchetype || stock.structural_cycle || "-"}; Confidence: ${stock.natal_confidence || "-"}; Source: ${stock.natal_source || "-"}; Birth date: ${formatDatesInText(stock.natal_birth_date || "-")}; Computed: ${stock.computed_from_natal ? "Yes" : "No"}; Registry: ${registryLine}`],
-    ["Natal validation / chart view", stock.natal_validation?.bestChart ? `${stock.natal_validation.bestChart.label || stock.natal_validation.bestChart.chartType} · ${stock.natal_validation.selectionStatus || "-"} · fit ${stock.natal_validation.bestChart.fitScore}/100 · reliability ${stock.natal_validation.bestChart.reliabilityScore}/100 · alternates ${stock.natal_validation.alternateCount}` : "-"],
     ["Natal personality", `Element bias: ${stock.natal_profile?.elementBias || "-"}; Dominant planets: ${(stock.natal_profile?.dominantPlanets || []).join(", ") || "-"}; Current multibagger state: ${stock.current_multibagger_probability || stock.multibagger_probability || "-"}; Cycle multibagger potential: ${stock.cycle_multibagger_potential || "-"}; Potential window: ${formatDatesInText(stock.cycle_potential_window || "-")}; Rotation / drawdown note: ${stock.expected_drawdown || "-"}`],
     ["Current astro signature", `${stock.environment_signature || "-"}; Cluster density: ${asScore(stock.cluster_density)}; Expansion score: ${asScore(stock.expansion_score)}; Pressure score: ${asScore(stock.pressure_score)}`],
     ["Transit Receptor Model", stock.transit_receptor_fit ? `${stock.transit_receptor_fit.transit?.family || "-"} → ${stock.transit_receptor_fit.expressionLabel || "-"}; score ${stock.transit_receptor_fit.scores?.expressionScore ?? "-"}; confidence ${stock.transit_receptor_fit.confidenceLabel || "-"}; sector ${stock.transit_receptor_fit.scores?.sectorThemeFit ?? "-"}; receptor ${stock.transit_receptor_fit.scores?.natalReceptorStrength ?? "-"}; pressure ${stock.transit_receptor_fit.scores?.pressureInterference ?? "-"}` : "-"],
     ["Transit Receptor Reading", stock.transit_receptor_fit?.reading || stock.transit_receptor_reading || "-"],
-    ["Upcoming catalyst", `${catalystLine} — ${catalystTiming}; Strength: ${stock.catalyst_strength || "-"}; Entry window: ${stock.current_window || "-"}`],
+    ["Upcoming catalyst", stock?.decision_v35 ? `${catalystLine}. Proximity: ${catalystTiming}. Strength: ${stock.catalyst_strength || "-"}. Tactical capital meaning: ${stock.decision_v35.language?.tacticalTimingPath || stock.decision_v35.language?.timingPath || "No typed tactical gate mapped."}` : `${catalystLine} — ${catalystTiming}; Strength: ${stock.catalyst_strength || "-"}; Entry window: ${stock.current_window || "-"}`],
     ["Current natal contacts", contacts.length ? contacts.join(" | ") : "-"],
     ["Catalyst contacts", catalystContacts.length ? catalystContacts.join(" | ") : "-"]
   ];
@@ -4054,7 +4685,7 @@ function StockDetailPanel({ stock, onClose }) {
         <div>
           <div style={miniLabelStyle}>Expanded stock card</div>
           <h3 style={{ margin: 0 }}>{stock.name}</h3>
-          <div style={smallMutedStyle}>Decision summary first; astrology research details below.</div>
+          <div style={smallMutedStyle}>Simple story first; tactical and strategic astrology separated below.</div>
         </div>
         <button onClick={onClose} style={closeButtonStyle}>Close</button>
       </div>
@@ -4062,44 +4693,39 @@ function StockDetailPanel({ stock, onClose }) {
       <div style={decisionCardStyle}>
         <div style={detailHeaderStyle}>
           <div>
-            <div style={miniLabelStyle}>Decision Summary</div>
-            <div style={smallMutedStyle}>Tactical and strategic signals kept separate.</div>
+          <div style={miniLabelStyle}>{stock?.decision_v35 ? "v35.4 Astro Truth → Behaviour → Capital → Typed Bucket-Sovereign Timing" : "Legacy v34.13 Decision Path"}</div>
+            <div style={{ fontSize: 21, fontWeight: 950, letterSpacing: 0.2 }}>{v34DecisionSummaryLabel(stock)}</div>
+            <div style={smallMutedStyle}>Pure astro instruction: review dates come from astrology, not price confirmation.</div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={miniLabelStyle}>Registry</div>
             <div>{registryLine}</div>
           </div>
         </div>
-        <div style={actionChipRowStyle}>
-          <div style={actionChipPanelStyle}>
-            <div style={miniLabelStyle}>Core Posture</div>
-            <ActionBadge action={resolvedActionParts(stock).corePosture} />
-          </div>
-          <div style={actionChipPanelStyle}>
-            <div style={miniLabelStyle}>Fresh Capital</div>
-            <ActionBadge action={resolvedActionParts(stock).freshCapital} />
-          </div>
-          <div style={actionChipPanelStyle}>
-            <div style={miniLabelStyle}>Strategic Action</div>
-            <span style={strategicChipStyle}>{resolvedDecision.strategicAction.split(" — ")[0]}</span>
-          </div>
-        </div>
-        <SynthesisBox stock={stock} />
-        <NatalValidationPanel stock={stock} />
         <ReratingRunwayBox runway={runway} />
-        <ReadableInfoTable rows={decisionRows} />
+        <div style={{ margin: "12px 0", padding: "12px 14px", border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1e3a8a", borderRadius: 14, fontWeight: 800, lineHeight: 1.45 }}>
+          {v34MainStory(stock)}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: 14, marginTop: 12 }}>
+          <V34ViewCard title="Tactical View" horizon="30–45 days" rows={v34TacticalRows(stock)} />
+          <V34ViewCard title="Strategic View" horizon="3–12/18 months" rows={v34StrategicRows(stock)} />
+        </div>
+        <details style={{ marginTop: 12, borderTop: "1px solid #e5e7eb", paddingTop: 10 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 800 }}>Decision summary fields</summary>
+          <ReadableInfoTable rows={decisionRows} />
+        </details>
       </div>
 
       <div style={pathGridStyle}>
         <PathTable
-          title="Tactical Path — next 6 weeks"
-          subtitle="Week-by-week path so the action is not trapped in one line."
+          title={stock?.decision_v35 ? "Tactical Timing Path — through next astro gate" : "Tactical Path — next 6 weeks"}
+          subtitle={stock?.decision_v35 ? "Only real mapped astro gates; rerun at the next gate." : "Week-by-week path after the simplified tactical view."}
           rows={tacticalPathRows}
         />
 
         <PathTable
-          title="Strategic Path — next 9 months"
-          subtitle="Month-by-month path for capital posture, leadership durability, and dormancy risk."
+          title={stock?.decision_v35 ? "Strategic Timing Path — through next strategic gate" : "Strategic Path — next 9 months"}
+          subtitle={stock?.decision_v35 ? "Strategic capital changes only at a strategic gate; tactical checks cannot override it." : "Month-by-month path for leadership durability, dormancy, and pressure management."}
           rows={strategicPathRows}
         />
       </div>
@@ -4231,8 +4857,9 @@ function tacticalScoreValue(stock) {
     "HEAVY TRIM": 2.8,
     "TRIM SATELLITE": 3.8,
     "WATCH CLOSELY": 5.0,
+    "HOLD CORE / NO FRESH": 5.2,
+    "NO FRESH ENTRY": 5.2,
     "HOLD CORE": 5.8,
-    "HOLD CONSTRUCTIVE CORE": 6.2,
     "STAGGER ADD": 6.6,
     "ACCUMULATE": 7.8,
     "AGGRESSIVE ACCUMULATION": 9.0
@@ -4317,6 +4944,12 @@ function parseForwardLeadership(stock) {
 }
 
 function strategicLeadershipLabel(stock) {
+  if (stock?.decision_v35) {
+    const n = numericValue(stock.decision_v35.astroTruth?.strategicLeadership);
+    if (n === null) return "-";
+    const date = stock.decision_v35.astroTruth?.strategicLeadershipDate;
+    return `${n}/100 · ${leadershipBand(n)} strategic horizon${date ? ` · mapped ${formatDateReadable(date)}` : ""}`;
+  }
   const forwardLeadership = parseForwardLeadership(stock);
   if (forwardLeadership !== null) {
     return `${forwardLeadership}/100 · ${leadershipBand(forwardLeadership)} forward window`;
@@ -4342,7 +4975,7 @@ function accumulationReviewWindowText(stock) {
   const caution = lead !== null && lead < 60
     ? ` Leadership is only ${Math.round(lead)}/100, so this is a review date, not a growth signal.`
     : score !== null && score < 7
-      ? " Treat as selective accumulation only if the astro catalyst has absorbed."
+      ? " Treat as selective accumulation after catalyst absorption."
       : " Use staggered deployment; this is not an all-in signal.";
   return formatDatesInText(`${prefix}: ${window}.${caution}`);
 }
@@ -4359,11 +4992,11 @@ function reratingGrowthWindowText(stock) {
   if (runway?.tone === "teal") {
     return formatDatesInText(`Near-window rerating/growth window: ${window}. Leadership ${forward ?? numericValue(stock?.leadership_probability) ?? "-"}/100; ${pressure.label.toLowerCase()} is manageable; dormancy ${String(dormancy).toLowerCase()}.`);
   }
-  if (runway?.tone === "amber") {
-    return formatDatesInText(`Natal-led constructive window: ${window}. Use staggered/selective capital; high rerating language is capped by TRM checks.`);
-  }
   if (runway?.tone === "grey") {
-    return formatDatesInText(`Cycle watch, not active rerating: ${window}. Potential exists, but tactical astrology is not yet strong enough for a growth-window label.`);
+    const activeTactical = (tactical ?? 0) >= 7 && dormancy === "LOW";
+    return formatDatesInText(activeTactical
+      ? `Cycle watch, not full rerating yet: ${window}. Tactical participation is active, but the larger rerating runway remains conditional until the mapped cycle gate.`
+      : `Cycle watch, not active rerating: ${window}. Potential exists, but deployment still waits for stronger mapped astro support.`);
   }
   if ((forward ?? 0) >= 70 && (strategic ?? 0) >= 7.2 && (tactical ?? 0) >= 6.2 && !["HIGH", "VERY HIGH"].includes(dormancy)) {
     return formatDatesInText(`Possible forward growth window: ${window}. Needs stronger near-window astro before becoming a rerating candidate.`);
@@ -4371,7 +5004,61 @@ function reratingGrowthWindowText(stock) {
   return "No confirmed rerating/growth window yet.";
 }
 
+function v35GateRoleLabel(role) {
+  const labels = {
+    PRESSURE_CHECK: "Pressure check",
+    EXPANSION_REVIEW: "Expansion review",
+    CATALYST_REVIEW: "Catalyst review",
+    REENTRY_REVIEW: "Re-entry review",
+    STRATEGIC_BUILD_REVIEW: "Strategic build review",
+    FULL_BUILD_UPGRADE_REVIEW: "Full-build upgrade review",
+    STRATEGIC_PROTECTION_REVIEW: "Strategic protection review"
+  };
+  return labels[role] || String(role || "Astro gate").replaceAll("_", " ").toLowerCase();
+}
+
+function v35GateSummary(gate, { includeExpectedBehaviour = false } = {}) {
+  if (!gate) return "No mapped astro gate.";
+  const role = v35GateRoleLabel(gate.role);
+  const label = gate.label ? ` — ${gate.label}` : "";
+  const reading = gate.astroReading
+    ? ` Astro reading: ${gate.astroReading}`
+    : gate.signalClass
+      ? ` Mapped type: ${String(gate.signalClass).replaceAll("_", " ")}.`
+      : "";
+  const expected = includeExpectedBehaviour && gate.expectedBehaviour
+    ? ` Expected stock expression: ${gate.expectedBehaviour}`
+    : "";
+  const instruction = gate.whatChanges
+    ? ` Capital instruction: ${String(gate.whatChanges).replaceAll("_", " ")}.`
+    : "";
+  return formatDatesInText(`${role}: ${gate.date}${label}.${reading}${expected}${instruction}`);
+}
+
+function v35TacticalContinuityText(stock) {
+  const v35 = stock?.decision_v35;
+  const gate = v35?.timingPath?.tacticalGate || v35?.timingPath?.nextGate || null;
+  const capital = v35?.language?.capital || {};
+  if (!gate) return `Fresh tactical capital remains ${capital.freshTacticalCapital || "NO FRESH"}; no later tactical gate is mapped.`;
+  const shared = gate.capitalBucket === "FRESH_TACTICAL_AND_STRATEGIC";
+  return formatDatesInText(`Until ${gate.date}: keep ${capital.freshTacticalCapital || "NO FRESH"}. At the gate, rerun ${shared ? "the tactical and strategic buckets together" : "the tactical bucket only"}; do not wait for price behaviour to define the astrology.`);
+}
+
+function v35StrategicContinuityText(stock) {
+  const v35 = stock?.decision_v35;
+  const gate = v35?.timingPath?.strategicGate || null;
+  const capital = v35?.language?.capital || {};
+  if (!gate) return `Strategic capital remains ${capital.strategicCapital || "WAIT"}; no later strategic decision gate is mapped.`;
+  const shared = gate.capitalBucket === "FRESH_TACTICAL_AND_STRATEGIC";
+  return formatDatesInText(`Until ${gate.date}: strategic capital remains ${capital.strategicCapital || "WAIT"}. At the gate, rerun ${shared ? "the tactical and strategic buckets together" : "the strategic bucket only"}.`);
+}
+
 function pressureWindowText(stock) {
+  if (stock?.decision_v35) {
+    const gate = stock.decision_v35?.timingPath?.tacticalGate || stock.decision_v35?.timingPath?.nextGate;
+    if (!gate) return "No next pressure or catalyst gate is mapped; keep the present decision primary.";
+    return v35GateSummary(gate, { includeExpectedBehaviour: true });
+  }
   const catalystLine = stock?.catalyst_label || stock?.next_event || "Current catalyst";
   const readiness = stock?.catalyst_readiness || stock?.current_window || stock?.next_pressure || stock?.current_pressure || "Prepare";
   const timing = readableEventTiming({
@@ -4384,6 +5071,83 @@ function pressureWindowText(stock) {
   return formatDatesInText(`${sev.label}: ${catalystLine} — ${timing}`);
 }
 
+function strategicGateText(stock) {
+  if (!stock?.decision_v35) return v34StrategicPressureWindow(stock);
+  const v35 = stock.decision_v35;
+  const gate = v35.timingPath?.strategicGate || null;
+  if (!gate) {
+    if (v35.capitalDecision?.strategicCapital === "FULL_BUILD") {
+      return "No strategic protection/break gate is mapped. FULL BUILD remains active; tactical pressure checks do not pause or revoke it.";
+    }
+    return v35.language?.strategicTimingPath || "No later strategic decision gate is mapped; keep the present strategic decision primary.";
+  }
+  return v35GateSummary(gate, { includeExpectedBehaviour: true });
+}
+
+
+function pressureGateDateText(stock) {
+  const iso = extractFirstIsoDate(stock?.catalyst_date) || isoFromDaysAhead(stock?.days_to_event ?? stock?.next_ignition);
+  return iso ? formatDateReadable(iso) : stockWindowDateText(pressureWindowText(stock));
+}
+
+function actionDateWindowRaw(stock) {
+  return stock?.cycle_potential_window || stock?.recovery_window || stock?.phase_fit || stock?.best_window || "";
+}
+
+function actionDateStatus(rawWindow) {
+  const days = daysUntilDate(rawWindow);
+  const dateText = stockWindowDateText(rawWindow);
+  if (!rawWindow || rawWindow === "-" || dateText === "mapped window") return "No date mapped";
+  if (days === null) return dateText;
+  if (days < -14) return `Past · ${dateText}`;
+  if (days <= 0) return `Open now · ${dateText}`;
+  if (days <= 45) return `Near · ${dateText}`;
+  return `Ahead · ${dateText}`;
+}
+
+function actionDateForStock(stock) {
+  if (!stock?.computed_from_natal) {
+    return { label: "Natal data", date: "Pending", note: "Add natal chart" };
+  }
+
+  if (stock?.decision_v35) {
+    const v35 = stock.decision_v35;
+    const gate = v35.timingPath?.nextGate;
+    const active = ["STAGGER_ADD", "PART_SIZED_ONLY"].includes(v35.capitalDecision?.freshTacticalCapital);
+    if (active) return { label: "Active now", date: gate ? `Next: ${String(gate.role).replaceAll("_", " ")} · ${formatDateReadable(gate.date)}` : "No later gate mapped", note: "Staged deployment" };
+    if (gate) return { label: String(gate.role).replaceAll("_", " "), date: formatDateReadable(gate.date), note: String(gate.capitalBucket).replaceAll("_", " ") };
+    return { label: "Current decision", date: "No later gate mapped", note: "Keep present posture" };
+  }
+
+  const tactical = v347TacticalDecision(stock);
+  const strategic = v347StrategicDecision(stock);
+  const rawBest = actionDateWindowRaw(stock);
+  const bestStatus = actionDateStatus(rawBest);
+  const pressureText = pressureGateDateText(stock);
+
+  if (tactical.kind === "break-protect") {
+    return { label: "Break-risk", date: pressureText, note: "Hard pressure" };
+  }
+
+  if (tactical.kind === "pressure-watch" || strategic.label === "PROTECT") {
+    return { label: "Protection", date: pressureText, note: "Nearest pressure gate" };
+  }
+
+  if (tactical.kind === "strong-active" || tactical.kind === "active") {
+    return { label: "Expansion", date: bestStatus, note: "Part-sized add" };
+  }
+
+  if (strategic.label === "WAIT" || tactical.kind === "future-review" || tactical.kind === "watch") {
+    return { label: "Review", date: bestStatus, note: "No action today" };
+  }
+
+  if (strategic.label === "PART BUILD" || strategic.label === "FULL BUILD") {
+    return { label: "Strategic", date: bestStatus, note: strategic.label };
+  }
+
+  return { label: "Review", date: bestStatus, note: "No action today" };
+}
+
 function tacticalActionText(stock) {
   const action = normalizeActionLabel(stock?.action || "WATCH CLOSELY");
   const readiness = stock?.catalyst_readiness || stock?.current_window || "";
@@ -4393,12 +5157,11 @@ function tacticalActionText(stock) {
     "REDUCE / EXIT": "Exit into strength only when hard pressure is active; capital protection first.",
     "HEAVY TRIM": "Reduce meaningfully; do not add until pressure repairs.",
     "TRIM SATELLITE": "Use rallies to reduce heat; avoid fresh chase.",
-    "WATCH CLOSELY": "Wait for astro catalyst absorption; keep position size disciplined.",
+    "WATCH CLOSELY": "Use the mapped catalyst-absorption gate; keep position size disciplined.",
     "HOLD CORE": "Hold existing core through normal volatility.",
-    "HOLD CONSTRUCTIVE CORE": "Hold existing exposure; add only if fresh-capital gate remains supportive.",
     "STAGGER ADD": "Begin slowly; add in parts around pressure or catalyst confirmation.",
-    "ACCUMULATE": "Add meaningfully in planned tranches if position sizing and risk allow.",
-    "AGGRESSIVE ACCUMULATION": "Rare highest-conviction setup; still deploy through disciplined tranches."
+    "ACCUMULATE": "Add meaningfully if position sizing and risk allow.",
+    "AGGRESSIVE ACCUMULATION": "Priority setup; deploy aggressively on dips."
   };
 
   const base = map[action] || "Monitor catalyst response.";
@@ -4439,7 +5202,7 @@ function strategicActionText(stock) {
   }
 
   if (forward !== null && forward >= 75 && (selectiveNow || distant)) {
-    return formatDatesInText(`DEFERRED LEADER — wait for mapped window ${best}.`);
+    return formatDatesInText(`DEFERRED LEADER — use mapped window ${best}.`);
   }
 
   if (forward !== null && forward >= 70) {
@@ -4460,6 +5223,10 @@ function strategicActionText(stock) {
 function broadViewText(stock, { full = false } = {}) {
   if (!stock?.computed_from_natal) {
     return "Natal chart pending; stock-specific response is not inferred.";
+  }
+  if (stock?.decision_v35) {
+    const text = `${stock.decision_v35.language?.astroSummary || ""} ${stock.decision_v35.language?.strategicNote || ""} Tactical: ${stock.decision_v35.language?.tacticalTimingPath || stock.decision_v35.language?.timingPath || ""} Strategic: ${stock.decision_v35.language?.strategicTimingPath || ""}`.trim();
+    return full ? text : shortText(text, 145);
   }
 
   const action = normalizeActionLabel(stock?.action || "WATCH CLOSELY");
@@ -4494,6 +5261,16 @@ function catalystDaysValue(stock) {
   return 9999;
 }
 
+function pressureWindowDaysValue(stock) {
+  const direct = daysUntilDate(stock?.production_protection_date || stock?.catalyst_date || "");
+  if (direct !== null) return Math.max(0, direct);
+
+  const number = firstNumber(stock?.days_to_event ?? stock?.next_ignition ?? stock?.catalyst_timing ?? "");
+  if (number !== null) return Math.max(0, number);
+
+  return null;
+}
+
 function mappedWindowDaysValue(stock) {
   const bestRaw = stock?.cycle_potential_window || stock?.recovery_window || stock?.phase_fit || stock?.best_window || "";
   const days = daysUntilDate(bestRaw);
@@ -4514,11 +5291,11 @@ function matchesTableFilter(stock, filter) {
   }
 
   if (filter === "WATCH_TRIM") {
-    return ["WATCH CLOSELY", "TRIM SATELLITE", "HEAVY TRIM", "EXIT STRENGTH", "REDUCE / EXIT"].includes(action);
+    return ["WATCH CLOSELY", "HOLD CORE / NO FRESH", "NO FRESH ENTRY", "TRIM SATELLITE", "HEAVY TRIM", "EXIT STRENGTH", "REDUCE / EXIT"].includes(action);
   }
 
   if (filter === "HOLD") {
-    return action === "HOLD CORE" || action === "HOLD CONSTRUCTIVE CORE";
+    return action === "HOLD CORE";
   }
 
   if (filter === "LEADERS") {
@@ -4549,7 +5326,7 @@ function filterAndSortStocks(stocks, { tableFilter, tableSort, registryFilter })
     CATALYST_ASC: (a, b) => catalystDaysValue(a) - catalystDaysValue(b),
     WINDOW_ASC: (a, b) => mappedWindowDaysValue(a) - mappedWindowDaysValue(b),
     PRESSURE_FIRST: (a, b) => {
-      const order = { "EXIT STRENGTH": 0, "REDUCE / EXIT": 0, "HEAVY TRIM": 1, "TRIM SATELLITE": 2, "WATCH CLOSELY": 3, "HOLD CORE": 4, "HOLD CONSTRUCTIVE CORE": 5, "HOLD WINNER": 6, "STAGGER ADD": 7, "ACCUMULATE": 8, "AGGRESSIVE ACCUMULATION": 9 };
+      const order = { "EXIT STRENGTH": 0, "REDUCE / EXIT": 0, "HEAVY TRIM": 1, "TRIM SATELLITE": 2, "WATCH CLOSELY": 3, "HOLD CORE / NO FRESH": 4, "NO FRESH ENTRY": 4, "HOLD CORE": 5, "HOLD WINNER": 6, "STAGGER ADD": 7, "ACCUMULATE": 8, "AGGRESSIVE ACCUMULATION": 9 };
       return (order[normalizeActionLabel(a?.action)] ?? 9) - (order[normalizeActionLabel(b?.action)] ?? 9);
     }
   };
@@ -4566,10 +5343,10 @@ function PriorityPanels({ stocks, onSelectStock, setTableFilter, setTableSort })
   const topTactical = byBucket("TACTICAL")
     .sort((a, b) => (tacticalScoreValue(b) ?? 0) - (tacticalScoreValue(a) ?? 0))
     .slice(0, 4);
-  const topStrategic = byBucket("STRATEGIC")
+  const topStrategic = byBucket("STRATEGIC").concat(byBucket("CONDITIONAL"))
     .sort((a, b) => (strategicScoreValue(b) ?? 0) - (strategicScoreValue(a) ?? 0))
     .slice(0, 4);
-  const dormancyWatch = byBucket("DORMANT")
+  const dormancyWatch = byBucket("DORMANT").concat(byBucket("TACTICAL_MANAGED"))
     .sort((a, b) => (strategicScoreValue(b) ?? 0) - (strategicScoreValue(a) ?? 0))
     .slice(0, 4);
   const pressureWatch = byBucket("PRESSURE")
@@ -4582,32 +5359,32 @@ function PriorityPanels({ stocks, onSelectStock, setTableFilter, setTableSort })
 
   const panels = [
     {
-      title: "Top tactical opportunities",
-      note: "Fresh/near-term action candidates",
+      title: "Clean tactical add candidates",
+      note: "Current add candidates after capital gates",
       items: topTactical,
       onClick: () => { setTableFilter?.("TACTICAL_NOW"); setTableSort?.("TACTICAL_DESC"); }
     },
     {
-      title: "Top strategic leaders",
-      note: "Highest forward opportunity quality",
+      title: "Forward leadership candidates",
+      note: "Leadership quality; still respect capital gates",
       items: topStrategic,
       onClick: () => { setTableFilter?.("LEADERS"); setTableSort?.("STRATEGIC_DESC"); }
     },
     {
-      title: "Dormant capital watch",
-      note: "Strong names where fresh money may wait",
+      title: "Tactical-only / future gates",
+      note: "Active names where strategic/passive capital is not approved",
       items: dormancyWatch,
       onClick: () => { setTableFilter?.("ALL"); setTableSort?.("WINDOW_ASC"); }
     },
     {
-      title: "Pressure / trim watch",
-      note: "Capital-protection and weak tactical windows",
+      title: "Pressure / trim gates",
+      note: "Known pressure gates and defensive windows",
       items: pressureWatch,
       onClick: () => { setTableFilter?.("WATCH_TRIM"); setTableSort?.("PRESSURE_FIRST"); }
     },
     {
       title: "Fresh capital candidates",
-      note: "Lower dormancy with add posture",
+      note: "Low dormancy plus deployable action",
       items: freshCapital,
       onClick: () => { setTableFilter?.("ADD"); setTableSort?.("TACTICAL_DESC"); }
     }
@@ -4631,7 +5408,7 @@ function PriorityPanels({ stocks, onSelectStock, setTableFilter, setTableSort })
               >
                 <strong>{stock.name}</strong>
                 <span>{formatScore(panel.title.includes("tactical") ? tacticalScoreValue(stock) : strategicScoreValue(stock))}</span>
-                <small style={smallMutedStyle}>{finalSynthesisLabel(stock).driver} · {shortText(`${finalSynthesisLabel(stock).label}: ${finalSynthesisLabel(stock).level}`, 70)}</small>
+                <small style={smallMutedStyle}>{shortText(finalStockDecision(stock).mainLabel, 70)}</small>
               </button>
             )) : <span style={smallMutedStyle}>No current matches.</span>}
           </div>
@@ -4654,7 +5431,7 @@ function TableControls({ totalCount, visibleCount, tableFilter, setTableFilter, 
         <select value={tableFilter} onChange={(event) => setTableFilter(event.target.value)} style={filterSelectStyle}>
           <option value="ALL">All actions</option>
           <option value="ADD">Add / Accumulate only</option>
-          <option value="WATCH_TRIM">Watch / Trim / Exit only</option>
+          <option value="WATCH_TRIM">Pressure / Trim / Exit only</option>
           <option value="HOLD">Hold Core only</option>
           <option value="LEADERS">Strategic leaders only</option>
           <option value="TACTICAL_NOW">Tactical opportunities now</option>
@@ -4687,27 +5464,47 @@ function TableControls({ totalCount, visibleCount, tableFilter, setTableFilter, 
 }
 
 function StockTable({ stocks, researchView, selectedStock, onSelectStock }) {
+  const simpleHeaders = [
+    "Stock",
+    "Regime",
+    "Tactical Leadership",
+    "Tactical Score /10",
+    "Tactical Action",
+    "Date",
+    "Cycle / Rerating Potential",
+    "Correction Mode",
+    "Strategic Leadership",
+    "Strategic Score /10",
+    "Strategic Action"
+  ];
+
+  const researchHeaders = [
+    "Stock",
+    "Natal Type",
+    "Catalyst Window",
+    "Expected Response",
+    "Regime",
+    "Tactical Leadership",
+    "Tactical Score /10",
+    "Tactical Action",
+    "Action Bucket",
+    "Date",
+    "Cycle / Rerating Potential",
+    "Dormancy Risk",
+    "Correction Mode",
+    "Strategic Leadership",
+    "Strategic Score /10",
+    "Strategic Action"
+  ];
+
   return (
     <div style={tableScrollStyle}>
       <table style={tableStyle}>
         <thead>
           <tr>
-            <th style={thStyle}>Stock</th>
-            <th style={thStyle}>Natal Type</th>
-            <th style={thStyle}>Chart Match</th>
-            <th style={thStyle}>Catalyst Window</th>
-            <th style={thStyle}>Expected Response</th>
-            <th style={thStyle}>Regime</th>
-            <th style={thStyle}>Tactical Leadership</th>
-            <th style={thStyle}>Tactical Score /10</th>
-            <th style={thStyle}>Tactical Action</th>
-            <th style={thStyle}>Action Bucket</th>
-            <th style={thStyle}>Cycle / Rerating Potential</th>
-            <th style={thStyle}>Dormancy Risk</th>
-            <th style={thStyle}>Correction Mode</th>
-            <th style={thStyle}>Strategic Leadership</th>
-            <th style={thStyle}>Strategic Score /10</th>
-            <th style={thStyle}>Strategic Action</th>
+            {(researchView ? researchHeaders : simpleHeaders).map(header => (
+              <th key={header} style={thStyle}>{header}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -4720,6 +5517,109 @@ function StockTable({ stocks, researchView, selectedStock, onSelectStock }) {
             const timing = stock.next_ignition || stock.days_to_event || "-";
             const phase = cycleStageLabel(stock.phase_fit || stock.recovery_window || "-");
             const locked = isCoreLocked(stock);
+            const actionDate = actionDateForStock(stock);
+            const decision = finalStockDecision(stock);
+
+            const stockCell = (
+              <td style={{ ...tdStyle, minWidth: 105, maxWidth: 115 }}>
+                <strong>{stock.name}</strong>
+                <br />
+                <span style={smallMutedStyle}>{String(stock.natal_confidence || "-").toUpperCase()} · {locked ? "locked" : "editable"}</span>
+              </td>
+            );
+
+            const regimeCell = (
+              <td style={{ ...tdStyle, minWidth: 78, maxWidth: 90 }}>
+                <SummaryBadge label={regime} tone={pressureTone(stock.current_pressure)} />
+              </td>
+            );
+
+            const tacticalLeadershipCell = (
+              <td style={{ ...tdStyle, minWidth: 112, maxWidth: 128, fontWeight: "bold", color: stock.leadership_probability >= 75 ? "#16a34a" : stock.leadership_probability < 45 ? "#dc2626" : "#111827" }}>
+                {tacticalLeadershipLabel(stock)}
+              </td>
+            );
+
+            const tacticalScoreCell = (
+              <td style={{ ...tdStyle, minWidth: 110, maxWidth: 125, fontWeight: "bold" }}>
+                {tacticalScore(stock)}
+              </td>
+            );
+
+            const simpleTactical = v347TacticalDecision(stock);
+            const simpleStrategic = v347StrategicDecision(stock);
+
+            const tacticalActionCell = (
+              <td style={{ ...tdStyle, minWidth: researchView ? 135 : 150, maxWidth: researchView ? 155 : 170 }}>
+                {researchView ? (
+                  <div style={cellClampStyle}>{shortText(decision.tacticalAction, 115)}</div>
+                ) : (
+                  <div title={simpleTactical.posture}>
+                    <ActionBadge action={simpleTactical.action} compact />
+                    <br />
+                    <span style={smallMutedStyle}>{shortText(simpleTactical.posture, 70)}</span>
+                  </div>
+                )}
+              </td>
+            );
+
+            const dateCell = (
+              <td style={{ ...tdStyle, minWidth: 115, maxWidth: 135 }}>
+                <strong>{actionDate.label}</strong>
+                <br />
+                <span style={smallMutedStyle}>{formatDatesInText(actionDate.date)}</span>
+              </td>
+            );
+
+            const cycleCell = (
+              <td style={{ ...tdStyle, minWidth: 125, maxWidth: 140 }}>
+                {stock?.decision_v35 ? (
+                  <>
+                    <strong>{String(stock.decision_v35.behaviour?.state || "SELECTIVE").replaceAll("_", " ")}</strong>
+                    <br />
+                    <span style={smallMutedStyle}>Runway: {cyclePotential} ({stock.cycle_potential_score ?? "-"}/100) · confidence {stock.cycle_potential_confidence ?? "-"}/100</span>
+                  </>
+                ) : (
+                  <>
+                    <strong>{phase}</strong>
+                    <br />
+                    <span style={smallMutedStyle}>Current: {currentPotential} · Cycle: {cyclePotential}</span>
+                  </>
+                )}
+              </td>
+            );
+
+            const correctionCell = (
+              <td style={{ ...tdStyle, minWidth: 112, maxWidth: 130 }}>
+                <SummaryBadge label={correctionModeValue(stock)} tone={correctionTone(correctionModeValue(stock))} />
+              </td>
+            );
+
+            const strategicLeadershipCell = (
+              <td style={{ ...tdStyle, minWidth: 118, maxWidth: 135, fontWeight: "bold" }}>
+                {strategicLeadershipLabel(stock)}
+              </td>
+            );
+
+            const strategicScoreCell = (
+              <td style={{ ...tdStyle, minWidth: 112, maxWidth: 128, fontWeight: "bold" }}>
+                {strategicScore(stock)}
+              </td>
+            );
+
+            const strategicActionCell = (
+              <td style={{ ...tdStyle, minWidth: researchView ? 145 : 150, maxWidth: researchView ? 165 : 170 }}>
+                {researchView ? (
+                  <div title={finalStockDecision(stock).strategicAction} style={cellClampStyle}>{strategicActionCompact(decision.strategicAction, stock)}</div>
+                ) : (
+                  <div title={simpleStrategic.meaning} style={cellClampStyle}>
+                    <span style={strategicChipStyle}>{simpleStrategic.label}</span>
+                    <br />
+                    <span style={smallMutedStyle}>{shortText(simpleStrategic.meaning, 72)}</span>
+                  </div>
+                )}
+              </td>
+            );
 
             return (
               <tr
@@ -4728,60 +5628,49 @@ function StockTable({ stocks, researchView, selectedStock, onSelectStock }) {
                 title="Click row for Fin-Lumen expanded stock card"
                 style={{ cursor: "pointer", background: selected ? "#fff7ed" : "white" }}
               >
-                <td style={{ ...tdStyle, minWidth: 105, maxWidth: 115 }}>
-                  <strong>{stock.name}</strong>
-                  <br />
-                  <span style={smallMutedStyle}>{String(stock.natal_confidence || "-").toUpperCase()} · {locked ? "locked" : "editable"}</span>
-                </td>
-                <td style={{ ...tdStyle, minWidth: 110, maxWidth: 125 }}><div style={cellClampStyle}>{stock.structural_cycle || "-"}</div></td>
-                <td style={{ ...tdStyle, minWidth: 118, maxWidth: 135 }}>
-                  <strong>{stock.natal_validation?.bestChart?.label || stock.displayed_chart_id || "-"}</strong>
-                  <br />
-                  <span style={smallMutedStyle}>{stock.natal_validation?.selectionStatus || "-"} · {stock.natal_validation?.bestChart?.selectionScore ?? "-"} · Alt {stock.chart_alternate_count ?? 0}</span>
-                </td>
-                <td style={{ ...tdStyle, minWidth: 125, maxWidth: 140 }}>
-                  <strong>{formatDatesInText(catalystLine)}</strong>
-                  <br />
-                  <span style={smallMutedStyle}>{stock.catalyst_readiness || stock.current_window || "-"} · {formatDatesInText(timing)}</span>
-                </td>
-                <td style={{ ...tdStyle, minWidth: 145, maxWidth: 165 }}>
-                  <div style={cellClampStyle}>{shortText(formatDatesInText(stock.catalyst_response || stock.expected_behaviour), 120)}</div>
-                </td>
-                <td style={{ ...tdStyle, minWidth: 78, maxWidth: 90 }}>
-                  <SummaryBadge label={regime} tone={pressureTone(stock.current_pressure)} />
-                </td>
-                <td style={{ ...tdStyle, minWidth: 112, maxWidth: 128, fontWeight: "bold", color: stock.leadership_probability >= 75 ? "#16a34a" : stock.leadership_probability < 45 ? "#dc2626" : "#111827" }}>
-                  {tacticalLeadershipLabel(stock)}
-                </td>
-                <td style={{ ...tdStyle, minWidth: 110, maxWidth: 125, fontWeight: "bold" }}>
-                  {tacticalScore(stock)}
-                </td>
-                <td style={{ ...tdStyle, minWidth: 135, maxWidth: 155 }}>
-                  <div style={cellClampStyle}>{shortText(finalStockDecision(stock).tacticalAction, 115)}</div>
-                </td>
-                <td style={{ ...tdStyle, minWidth: 105, maxWidth: 115, textAlign: "center" }}>
-                  <ActionBadge action={resolvedActionParts(stock).freshCapital || normalizeActionLabel(finalStockDecision(stock).tacticalAction)} compact />
-                </td>
-                <td style={{ ...tdStyle, minWidth: 125, maxWidth: 140 }}>
-                  <strong>{phase}</strong>
-                  <br />
-                  <span style={smallMutedStyle}>Current: {currentPotential} · Cycle: {cyclePotential}</span>
-                </td>
-                <td style={{ ...tdStyle, minWidth: 92, maxWidth: 105 }}>
-                  <SummaryBadge label={dormancyRiskText(stock)} tone={dormancyTone(dormancyRiskText(stock))} />
-                </td>
-                <td style={{ ...tdStyle, minWidth: 112, maxWidth: 130 }}>
-                  <SummaryBadge label={correctionModeValue(stock)} tone={correctionTone(correctionModeValue(stock))} />
-                </td>
-                <td style={{ ...tdStyle, minWidth: 118, maxWidth: 135, fontWeight: "bold" }}>
-                  {strategicLeadershipLabel(stock)}
-                </td>
-                <td style={{ ...tdStyle, minWidth: 112, maxWidth: 128, fontWeight: "bold" }}>
-                  {strategicScore(stock)}
-                </td>
-                <td style={{ ...tdStyle, minWidth: 145, maxWidth: 165 }}>
-                  <div style={cellClampStyle}>{shortText(finalStockDecision(stock).strategicAction, 125)}</div>
-                </td>
+                {stockCell}
+                {researchView ? (
+                  <>
+                    <td style={{ ...tdStyle, minWidth: 110, maxWidth: 125 }}><div style={cellClampStyle}>{stock.structural_cycle || "-"}</div></td>
+                    <td style={{ ...tdStyle, minWidth: 125, maxWidth: 140 }}>
+                      <strong>{formatDatesInText(catalystLine)}</strong>
+                      <br />
+                      <span style={smallMutedStyle}>{stock.catalyst_readiness || stock.current_window || "-"} · {formatDatesInText(timing)}</span>
+                    </td>
+                    <td style={{ ...tdStyle, minWidth: 145, maxWidth: 165 }}>
+                      <div style={cellClampStyle}>{shortText(formatDatesInText(stock.catalyst_response || stock.expected_behaviour), 120)}</div>
+                    </td>
+                    {regimeCell}
+                    {tacticalLeadershipCell}
+                    {tacticalScoreCell}
+                    {tacticalActionCell}
+                    <td style={{ ...tdStyle, minWidth: 105, maxWidth: 115, textAlign: "center" }}>
+                      <ActionBadge action={resolvedActionParts(stock).tacticalBucket || normalizeActionLabel(decision.tacticalAction)} compact />
+                    </td>
+                    {dateCell}
+                    {cycleCell}
+                    <td style={{ ...tdStyle, minWidth: 92, maxWidth: 105 }}>
+                      <SummaryBadge label={dormancyRiskText(stock)} tone={dormancyTone(dormancyRiskText(stock))} />
+                    </td>
+                    {correctionCell}
+                    {strategicLeadershipCell}
+                    {strategicScoreCell}
+                    {strategicActionCell}
+                  </>
+                ) : (
+                  <>
+                    {regimeCell}
+                    {tacticalLeadershipCell}
+                    {tacticalScoreCell}
+                    {tacticalActionCell}
+                    {dateCell}
+                    {cycleCell}
+                    {correctionCell}
+                    {strategicLeadershipCell}
+                    {strategicScoreCell}
+                    {strategicActionCell}
+                  </>
+                )}
               </tr>
             );
           })}
@@ -4790,7 +5679,6 @@ function StockTable({ stocks, researchView, selectedStock, onSelectStock }) {
     </div>
   );
 }
-
 
 
 
@@ -5439,7 +6327,8 @@ const tableStyle = {
   width: "100%",
   minWidth: 1320,
   borderCollapse: "collapse",
-  background: "white"
+  background: "white",
+  tableLayout: "fixed"
 };
 
 const thStyle = {
@@ -5457,7 +6346,9 @@ const tdStyle = {
   padding: "7px 6px",
   verticalAlign: "top",
   fontSize: 11.5,
-  lineHeight: 1.45
+  lineHeight: 1.45,
+  overflowWrap: "anywhere",
+  wordBreak: "normal"
 };
 
 
@@ -5465,7 +6356,9 @@ const cellClampStyle = {
   display: "-webkit-box",
   WebkitLineClamp: 2,
   WebkitBoxOrient: "vertical",
-  overflow: "hidden"
+  overflow: "hidden",
+  overflowWrap: "anywhere",
+  wordBreak: "normal"
 };
 
 const smallButtonStyle = {

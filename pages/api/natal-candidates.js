@@ -1,6 +1,5 @@
 import resolveCompany from "../../lib/companyResolver.js";
-import validationRegistry from "../../lib/natalChartValidationRegistry.js";
-import { evaluateNatalValidation } from "../../lib/natalValidationEngine.js";
+import validationRegistry from "../../data/natalChartValidation.json" assert { type: "json" };
 
 export default async function handler(req, res) {
   const ticker = String(req.query.ticker || "").trim();
@@ -10,7 +9,6 @@ export default async function handler(req, res) {
   if (!company?.found) return res.status(404).json({ success: false, error: company?.error || "Company not found" });
 
   const validation = validationRegistry?.stocks?.[company.symbol] || null;
-  const natalValidation = evaluateNatalValidation(company, { selectedChartId: req.query.chartId || company.selectedChartId || company.preferredChartId });
   const candidates = (company.charts || []).map(chart => ({
     id: chart.id,
     chartType: chart.chartType,
@@ -33,7 +31,6 @@ export default async function handler(req, res) {
     researchCase: company.researchCase || null,
     validationEligibility: company.validationEligibility || "included-research",
     validation,
-    natalValidation,
     candidates
   });
 }

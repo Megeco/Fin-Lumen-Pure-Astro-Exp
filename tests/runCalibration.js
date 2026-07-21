@@ -18,13 +18,7 @@ const replayLab = fs.readFileSync(path.join(root, "pages", "api", "replay-lab.js
 const replayApi = fs.readFileSync(path.join(root, "pages", "api", "replay.js"), "utf8");
 const replayValidationIntelligence = fs.readFileSync(path.join(root, "lib", "replayValidationIntelligence.js"), "utf8");
 const narrativeSynthesisEngine = fs.readFileSync(path.join(root, "lib", "narrativeSynthesisEngine.js"), "utf8");
-const contradictionEngine = fs.readFileSync(path.join(root, "lib", "contradictionEngine.js"), "utf8");
-const confidenceCalibrationEngine = fs.readFileSync(path.join(root, "lib", "confidenceCalibrationEngine.js"), "utf8");
-const capitalLanguage = fs.readFileSync(path.join(root, "lib", "finLumenCapitalLanguage.js"), "utf8");
 const sectorOntology = fs.readFileSync(path.join(root, "lib", "sectorOntology.js"), "utf8");
-const natalValidationEngine = fs.readFileSync(path.join(root, "lib", "natalValidationEngine.js"), "utf8");
-const v35CandidateCharts = fs.readFileSync(path.join(root, "lib", "v35CandidateCharts.js"), "utf8");
-const natalValidationApi = fs.readFileSync(path.join(root, "pages", "api", "natal-validation.js"), "utf8");
 
 const checks = [
   ["transition removed from raw pressure bucket", !realEphemeris.includes('["pressure", "transition", "volatility"].includes(item.type)')],
@@ -51,21 +45,9 @@ const checks = [
   ["v33 replay lab passes TRM into validation", replayLab.includes("transitReceptorFit\n    });") && replayLab.includes("narrativeSynthesis")],
   ["v33 sector ontology restores shipbuilding and real estate", sectorOntology.includes("shipbuilding") && sectorOntology.includes("realEstate")],
   ["v33 replay API emits synthesis", replayApi.includes("replayValidationIntelligence") && replayApi.includes("narrativeSynthesis")],
-  ["v33.1 contradiction engine present", contradictionEngine.includes("buildContradictionReport") && contradictionEngine.includes("HIGH_SIGNAL_LOW_NATAL_RELIABILITY") && contradictionEngine.includes("RERATING_WITH_FAILED_HARD_STOP")],
-  ["v33.1 confidence calibration present", confidenceCalibrationEngine.includes("calibrateInterpretationConfidence") && confidenceCalibrationEngine.includes("Signal Strength") && confidenceCalibrationEngine.includes("natalReliability")],
-  ["v33.1 capital language softening present", capitalLanguage.includes("softenCapitalVerdict") && capitalLanguage.includes("Fresh allocation not favoured") && capitalLanguage.includes("TRM_BLOCK_FRESH_CLASSES")],
-  ["v33.1 replay intelligence emits hardening fields", replayValidationIntelligence.includes("contradictionReport") && replayValidationIntelligence.includes("confidenceCalibration") && replayValidationIntelligence.includes("v33.1-synthesis-hardening")],
-  ["v33.1 narrative chronological capital story present", narrativeSynthesisEngine.includes("buildChronologicalStory") && narrativeSynthesisEngine.includes("Next 30–60 days") && narrativeSynthesisEngine.includes("Next 3–12 months") && narrativeSynthesisEngine.includes("12–24 month posture")],
-  ["v34 private card dad summary present", index.includes("Dad Summary") && index.includes("finalSynthesisLabel")],
-  ["v34 rerating language capped by TRM", index.includes("high rerating language is capped by TRM") && index.includes("Natal-led constructive setup")],
-  ["v34 hold winner tiered ladder present", index.includes("HOLD CONSTRUCTIVE CORE") && index.includes("activeLeader = leadership >= 75")],
-  ["v34 scanner driver type present", index.includes("finalSynthesisLabel(stock).driver")],
-  ["v34 long-range cycle potential separated from usability", index.includes("Long-range cycle potential") && index.includes("Current usability")],
-  ["v35 NVE engine present", natalValidationEngine.includes("evaluateNatalValidation") && natalValidationEngine.includes("No composite charts")],
-  ["v35 candidate registry ignores legacy remarks", v35CandidateCharts.includes("legacy remarks are intentionally ignored") && v35CandidateCharts.includes("AIAENG.NS")],
-  ["v35 natal validation API present", natalValidationApi.includes("/api/natal-validation") && natalValidationApi.includes("evaluateNatalValidation")],
-  ["v35 chart selector UI present", index.includes("Natal Validation + Chart Selector") && index.includes("No composite chart is created")]
-
+  ["v33.6 separates fresh capital from core posture", index.includes("fresh capital: no fresh entry") && index.includes("Action bucket describes the existing-position/tactical posture")],
+  ["v33.6 dormancy map present", index.includes("Capital dormancy map") && index.includes("dormancyMapText")],
+  ["v33.6 compact strategic table label present", index.includes("strategicActionCompact") && index.includes("title={finalStockDecision(stock).strategicAction}")]
 ];
 
 const failed = checks.filter(([, ok]) => !ok);

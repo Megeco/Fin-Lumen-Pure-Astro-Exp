@@ -1,94 +1,39 @@
-# Fin-Lumen v35 — Natal Validation + Chart Selector
+# Fin-Lumen Pure Astro
 
-# Fin-Lumen v35 — Natal Validation + Chart Selector
+## v35.4 typed gates and date clarity
 
-Private-use release.
+Risk-window placeholders are now translated into explicit astro-pressure types with the underlying expansion, pressure and leadership scores. The card distinguishes tactical gates, strategic deployment/protection gates and long-range cycle context; a strategic WAIT can reopen only at a deployment/re-entry gate. The main table renders the exact v35 strategic capital decision, and catalyst language now reconciles macro tone with the polarity of the stock-specific natal contact.
 
-## Core principle
+## v35.3 capital-bucket gate sovereignty
 
-No composite charts.
+Tactical and strategic timing are now sovereign paths. A pressure/catalyst gate tagged for existing and fresh tactical capital can rerun only those tactical buckets; it cannot pause, revoke, or defer an active strategic FULL BUILD. Strategic WAIT/PART BUILD/FULL BUILD cards now point to the next gate that actually affects strategic capital. Review language explicitly reruns Astro Truth rather than asking price behaviour to make the decision.
 
-The app keeps all credible corporate chart candidates available, selects the best current astro-match as the main-table default, and lets the expanded stock card compare alternate charts without blending them.
+## v35.2 Swiss Ephemeris sovereignty
 
-## What changed
+All active astronomical calculations now use direct Swiss Ephemeris `swe_calc_ut` calls through `@swisseph/node`, with bundled `.se1` files, Lahiri sidereal mode, exact UTC/Julian time, and native longitude speed. Returned flags must include `SEFLG_SWIEPH`; a Moshier or other fallback is a hard error. Natal charts, transits, nodes, ingresses, stations, macro aspects, eclipses, and historical archive generation share this one runtime. The former static JSON tables are not an execution path.
 
-- Added `lib/v35CandidateCharts.js` seeded from the manual pre-testing list.
-- Legacy remarks from the list are intentionally ignored.
-- Added `lib/natalValidationEngine.js`.
-- Added `/api/natal-validation`.
-- Expanded stock cards now include a Natal Validation + Chart Selector panel.
-- Main table now shows chart match, selection status, score, and alternate count.
-- `/api/replay` and `/api/replay-lab` can run a requested `chartId`.
-- Existing TRM/replay/narrative logic remains intact.
+This configuration is for private/personal use. Swiss Ephemeris is dual-licensed; do not publish or operate this build as a public service under the repository's MIT notice. Before public distribution or service activation, license the whole project compatibly with AGPL-3.0 or obtain the Swiss Ephemeris Professional License.
 
-## Status labels
+## v35.0 decision architecture
 
-- `BEST CURRENT MATCH`
-- `TENTATIVE BEST MATCH`
-- `LOCKED MANUAL`
-- `ALTERNATE VIEW`
-- `CANDIDATE`
-- `INSUFFICIENT DATA`
+Production decisions now follow one ordered chain: **Astro Truth → Behaviour → Capital Decision → Timing Path → Language**. The astronomical, natal, Supabase, replay and UI infrastructure is preserved; the new decision spine is isolated under `lib/v35/` and exposes a complete decision trace. See `docs/V35_0_HOLISTIC_ASTRO_TO_CAPITAL.md`.
 
-## Important limitation
+### v35.1 window sovereignty
 
-v35.0 provides the chart selector and conservative readiness scoring. Full empirical price-outcome scoring should be added in a later v35.x/v36 build through a Historical Event Store and Price Behaviour Labeller.
+The table and expanded card now render `decision_v35` directly instead of recomputing v34 decisions in the UI. Catalyst proximity is translated into a typed Pressure Check, Expansion Review, or Catalyst Review with an affected capital bucket. Tactical and strategic paths stop at the next real gate. Cycle runway magnitude is recalibrated so ordinary support cannot saturate to EXTREME.
+## v33.6 Capital Posture Split + Strategic Column Cleanup
 
-## User workflow
+This build keeps the v33.5 visual action ladder but clarifies the capital grammar:
 
-Main table:
-- shows the best current astro-match chart.
+- Existing/core posture and fresh-capital action are now treated as separate vocabularies. Fresh capital should no longer display as HOLD CORE.
+- Main-table Action Bucket now follows the existing-position/tactical posture, so TRIM SATELLITE rows display as TRIM SATELLITE rather than being softened into HOLD CORE.
+- Main-table Strategic Action is compact: CONDITIONAL, TACTICAL ONLY, AVOID FRESH, LEADER, WATCH GATE, etc. Full strategic explanation remains in the expanded stock card and hover/title.
+- Expanded cards now include a Capital Dormancy Map showing current capital efficiency, the near astro gate, and the re-entry/scale-up gate.
+- Cycle Watch wording distinguishes active tactical participation from a larger rerating runway that is still conditional.
 
-Expanded stock card:
-- shows all candidate charts.
-- click a chart to run a chart-specific replay preview.
-- no chart is averaged with another chart.
+ v33.5 — Visual Action Cleanup
 
-
----
-
-# Fin-Lumen Pure Astro v33.1 — Synthesis Hardening Build
-
-This package starts from **v32 TRM-1** and restores the stronger **v31.5.4 replay/capital/governance guardrails**.
-
-
-## v33.1 — Production-Hardening Patch
-
-This build incorporates the requested P0/P1 hardening:
-
-- **Replay Intelligence hardening:** v33.1 aligns TRM field paths, normalises receptor classes, restores capital-horizon gates, and emits `v33.1-synthesis-hardening`.
-- **Contradiction Engine:** `lib/contradictionEngine.js` flags conflicts such as high signal with low natal reliability, rerating labels that violate hard stops, strategic build language during receptor-blocked cycles, and weak sector/receptor conversion.
-- **Confidence calibration:** `lib/confidenceCalibrationEngine.js` separates signal strength from interpretation confidence and caps confidence when natal reliability, replay evidence or contradictions are weak.
-- **Narrative consistency:** `lib/narrativeSynthesisEngine.js` now produces one chronological capital story: now → 30–60d tactical → 3–12m strategic → acceleration watch → protection/review gate → 12–24m passive posture.
-- **Natal reliability weighting:** natal reliability is a first-class confidence driver and caps high-conviction language when below production-grade thresholds.
-- **Actionable language:** UI-facing capital language is softened but usable: fresh allocation favoured/not favoured, selective participation, conditional allocation, capital-protection posture, and passive restraint.
-
-
-Core doctrine:
-
-```text
-Macro weather → sector eligibility → natal receptor expression → pressure interference → historical confidence → capital horizon action → narrative synthesis
-```
-
-New in v33:
-
-- `lib/narrativeSynthesisEngine.js` creates one final cycle story.
-- Replay and Replay Lab emit `narrativeSynthesis` alongside `transitReceptorFit` and `replayValidationIntelligence`.
-- v31 capital-horizon guardrails are restored: tactical, strategic and passive long-term verdicts.
-- v31 dormancy contradiction and receptor-fit capital gates are restored.
-- v31 governance docs, replay ledgers and astrology learnings registries are restored.
-- Shipbuilding / defence shipyard and real estate / housing sector ontology entries are restored.
-
-Validation:
-
-```text
-npm run calibrate ✅ passed
-npm run build: environment-dependent; npm run calibrate ✅ passed in patch environment
-```
-
-See `docs/V33_SYNTHESIS_BUILD_NOTES.md`.
-
----
+This patch cleans the action legend and bucket mapping. `NO FRESH` is now a qualifier under `HOLD CORE`, not a separate tile. `WATCH CLOSELY` remains the mapped astro-gate bucket. Real trim instructions map to trim buckets.
 
 ## v31.2 — Historical Episode & Forecast Interaction Display
 
@@ -169,20 +114,17 @@ This build adds a company-specific transit-expression layer to v31.5. The new mo
 New fields are exposed as `transit_receptor_fit` in the main stock API and `transitReceptorFit` in replay APIs. See `docs/TRANSIT_RECEPTOR_MODEL_v32.md` for scoring rules and guardrails.
 
 
-## v34.0 Private Research UI Cleanup
+## v33.1 Production Synthesis Patch
 
-This patch turns the expanded stock card into a private capital-research card rather than a raw astrology scanner.
+This build promotes the stronger research/replay-validation layer into production display logic. The expanded stock card now receives the research-promoted tactical, strategic, passive long-term, dormancy and protection/acceleration verdicts from the same synthesis layer used in Replay Lab.
 
 Key changes:
-- Adds a Dad Summary at the top of the expanded stock card.
-- Adds final synthesis labels: Sector-led rerating, Natal-led constructive setup, Contested expansion, Supportive but muted, Rotation-away risk, Pressure absorption.
-- Caps HIGH rerating language when TRM sector fit is weak, replay memory is missing, TRM expression is below 70, or pressure interference is high.
-- Replaces casual HOLD WINNER usage with a tiered ladder: HOLD CORE → HOLD CONSTRUCTIVE CORE → HOLD WINNER.
-- Adds driver type to scanner cards: Sector-led, Natal-led, Replay-led, Pressure-led, Rotation-away, Mixed.
-- Reframes EXTREME cycle potential as long-range background potential and separates it from current capital usability.
-- Keeps raw astro details behind the existing Astro Research Details collapse.
 
+- Research layer promoted into production fields via `astroEngine`.
+- `narrativeSynthesisEngine` upgraded to v33.1 and fixes false early protection dates caused by matching `NO BREAK EVIDENCE` as a break.
+- Passive long-term verdict now inherits the capital-horizon guardrail instead of falling back to “not resolved.”
+- Eternal/Zomato receives a consumer-internet/platform-commerce sector profile.
+- Eternal’s name-change chart is promoted as the preferred post-2025 production chart, while date guards prevent future event charts from being used before their event date unless explicitly selected in Replay Lab.
+- Natal Registry save now falls back gracefully if older Supabase tables lack optional `audit_status`, `charts`, or `preferred_chart_id` columns.
 
-## GitHub compact package
-
-This v34 compact build keeps the runtime app, data, tests, and the latest essential docs while pruning older historical build notes so the repository stays below GitHub's 100-file upload limit.
+Validation: `npm run calibrate` passed. `next build` compiled successfully; in this sandbox it timed out during Next.js trace collection after successful compilation/page generation.

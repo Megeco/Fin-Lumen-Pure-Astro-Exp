@@ -1,21 +1,22 @@
 {
   "name": "fin-lumen-pure-astro",
-  "version": "35.0.0-natal-validation-chart-selector",
+  "version": "35.5.0-window-relative-capital-posture",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "calibrate": "node tests/runCalibration.js",
-    "historical:build": "node scripts/buildHistoricalArchive.js",
-    "historical:universe": "node scripts/buildHistoricalUniverse.js"
+    "test:v35": "node tests/runV35Architecture.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.50.0",
-    "astronomia": "4.2.0",
-    "astronomy-engine": "2.1.19",
+    "@swisseph/node": "1.3.0",
     "next": "14.2.5",
     "react": "18.2.0",
     "react-dom": "18.2.0"
+  },
+  "overrides": {
+    "@swisseph/core": "1.3.0"
   }
 }

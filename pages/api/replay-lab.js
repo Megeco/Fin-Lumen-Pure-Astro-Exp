@@ -26,13 +26,10 @@ import {
 } from "../../lib/realEphemeris.js";
 
 import { buildMacroThemeContext } from "../../lib/macroThemeEngine.js";
-import { getHistoricalRegistry } from "../../lib/historical/historicalResponseStore.js";
-import { queryHistoricalArchive } from "../../lib/historical/historicalPullEngine.js";
-import { buildEpisodeInteractionDisplay } from "../../lib/historical/episodeInteractionDisplay.js";
 import { buildReplayValidationIntelligence } from "../../lib/replayValidationIntelligence.js";
 import { evaluateTransitReceptorFit } from "../../lib/transitReceptorFitEngine.js";
 import { buildNarrativeSynthesis } from "../../lib/narrativeSynthesisEngine.js";
-import { evaluateNatalValidation } from "../../lib/natalValidationEngine.js";
+import { buildDecisionPipelineV35 } from "../../lib/v35/decisionPipeline.js";
 
 function toNumber(value, fallback) {
   const parsed = Number(value);
@@ -242,8 +239,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const chartId = String(req.query.chartId || "").trim() || null;
-    const company = await resolveCompany(ticker, null, { chartId });
+    const company = await resolveCompany(ticker, null, { chartId: String(req.query.chartId || "").trim() || null, asOfDate: date });
 
     if (!company?.found) {
       return res.status(404).json({
@@ -284,7 +280,6 @@ export default async function handler(req, res) {
     const macroSnapshot = buildMacroSnapshot(macroEphemeris);
     const episodeAwareReplay = windows?.immediate || replay;
     const sectorContext = buildMacroThemeContext(company, macroEphemeris, episodeAwareReplay);
-    const natalValidation = evaluateNatalValidation(company, { selectedChartId: company.selectedChartId || chartId || company.preferredChartId });
     const transitReceptorFit = evaluateTransitReceptorFit({
       company,
       natal,
@@ -292,60 +287,6 @@ export default async function handler(req, res) {
       replay: episodeAwareReplay,
       macro: macroEphemeris
     });
-    const dominantContact = (episodeAwareReplay?.transitDetails || []).slice().sort((a,b) => Math.abs(b.score || 0) - Math.abs(a.score || 0))[0] || null;
-    const historicalQuery = {
-      ticker: company.symbol || ticker,
-      transitFamily: dominantContact ? `${dominantContact.planet}->${dominantContact.targetPlanet}:${dominantContact.aspect}` : null,
-      sectorId: sectorContext?.primary?.sectorId || null,
-      priorAstroState: episodeAwareReplay?.finAstroGrammar?.pressure?.pressureRole || episodeAwareReplay?.grammarPressureRole || null,
-      macroPressure: macroSnapshot.pressure,
-      macroExpansion: macroSnapshot.expansion,
-      clusters: episodeAwareReplay?.activeClusters || []
-    };
-    const historicalRegistry = getHistoricalRegistry();
-    const currentSlowContacts = (episodeAwareReplay?.transitDetails || [])
-      .filter(contact => ["Jupiter", "Saturn", "Rahu", "Ketu", "Mars", "Eclipse"].includes(contact?.planet))
-      .slice()
-      .sort((a, b) => Math.abs(Number(b?.score) || 0) - Math.abs(Number(a?.score) || 0))
-      .slice(0, 8);
-
-    const historicalTransitEvidence = currentSlowContacts.map(contact => {
-      const transitFamily = `${contact.planet}->${contact.targetPlanet}:${contact.aspect}`;
-      const exactTickerMatches = historicalRegistry
-        .filter(event => String(event?.ticker || "").toLowerCase() === String(company.symbol || ticker || "").toLowerCase())
-        .filter(event => event?.transitFamily === transitFamily)
-        .filter(event => String(event?.eventDate || "") < date)
-        .sort((a, b) => String(b?.eventDate || "").localeCompare(String(a?.eventDate || "")))
-        .slice(0, 5);
-      return {
-        currentContact: {
-          planet: contact.planet,
-          targetPlanet: contact.targetPlanet,
-          aspect: contact.aspect,
-          orb: contact.orb,
-          score: contact.score,
-          transitSign: contact.transitSign || contact.sign || null,
-          text: contact.text || `${contact.planet} ${contact.aspect} natal ${contact.targetPlanet}`
-        },
-        transitFamily,
-        priorEpisodes: exactTickerMatches,
-        evidenceCount: exactTickerMatches.length,
-        note: exactTickerMatches.length
-          ? "Past behaviour is observational only and does not alter the replay score or action."
-          : "No populated prior price-response episode is available for this exact company/contact family yet."
-      };
-    });
-
-    const historicalPull = queryHistoricalArchive(historicalQuery, historicalRegistry, { limit: 12 });
-    const episodeInteractionDisplay = buildEpisodeInteractionDisplay({
-      replayDate: date,
-      replay: episodeAwareReplay,
-      windows,
-      macroSnapshot,
-      historicalRegistry,
-      ticker: company.symbol || ticker
-    });
-
     const replayValidationIntelligence = buildReplayValidationIntelligence({
       replayDate: date,
       replay: episodeAwareReplay,
@@ -361,6 +302,16 @@ export default async function handler(req, res) {
     });
 
     const narrativeSynthesis = buildNarrativeSynthesis({
+      replayDate: date,
+      replay: episodeAwareReplay,
+      windows,
+      macroSnapshot,
+      transitReceptorFit,
+      replayValidationIntelligence,
+      company
+    });
+
+    const decisionV35 = buildDecisionPipelineV35({
       replayDate: date,
       replay: episodeAwareReplay,
       windows,
@@ -441,16 +392,9 @@ export default async function handler(req, res) {
       macroSnapshot,
       sectorContext,
       transitReceptorFit,
-      historicalPull: { query: historicalQuery, ...historicalPull },
-      historicalTransitEvidence: {
-        mode: "DISPLAY_ONLY",
-        scoreImpact: "none",
-        archiveRecordCount: historicalRegistry.length,
-        contacts: historicalTransitEvidence
-      },
-      episodeInteractionDisplay,
       replayValidationIntelligence,
       narrativeSynthesis,
+      decisionV35,
       replaySummary,
       research: includeRaw
         ? {

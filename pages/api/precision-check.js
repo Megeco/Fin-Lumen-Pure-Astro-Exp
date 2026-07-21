@@ -1,42 +1,39 @@
 import {
-  generateRealTransits
+  ephemerisMetadata,
+  generateRealTransits,
+  nextRetrogradeTransitions,
+  nextSignIngress
 } from "../../lib/realTransitGenerator.js";
 import {
-  staticSwissMetadata,
-  hasStaticSwissData,
-  getStaticSwissEventsMetadata,
-  getStaticSwissUpcomingEvents
-} from "../../lib/staticSwissProvider.js";
+  getRelevantEclipses
+} from "../../lib/realEclipseEngine.js";
 
 export default async function handler(req, res) {
   const date = req.query.date || new Date().toISOString();
 
   try {
     const transits = generateRealTransits(date);
-    const metadata = staticSwissMetadata();
-    const eventsMetadata = getStaticSwissEventsMetadata();
-    const upcomingAspects = getStaticSwissUpcomingEvents(date, "macroAspects", 5, 45);
-    const upcomingStations = getStaticSwissUpcomingEvents(date, "stations", 5, 90);
-    const upcomingEclipses = getStaticSwissUpcomingEvents(date, "eclipses", 5, 180);
+    const metadata = ephemerisMetadata();
+    const referenceDate = new Date(date).toISOString().slice(0, 10);
+    const upcomingStations = nextRetrogradeTransitions("mercury", referenceDate, 120).slice(0, 2);
+    const upcomingEclipses = getRelevantEclipses(referenceDate, { daysBefore: 0, daysAfter: 365 }).slice(0, 4);
+    const nextJupiterIngress = nextSignIngress("jupiter", referenceDate, 730);
 
     return res.status(200).json({
-      success: hasStaticSwissData(),
+      success: true,
       route: "/api/precision-check",
       activeEngine: transits?.provider || transits?.ephemeris || "unknown",
       date,
-      staticSwissAvailable: hasStaticSwissData(),
-      exactEventsAvailable: Boolean(eventsMetadata?.available),
+      directSwissActive: transits?.ephemerisMode === "SEFLG_SWIEPH",
+      fallbackPolicy: transits?.fallbackPolicy,
       metadata,
-      eventsMetadata,
       upcomingEventSamples: {
-        macroAspects: upcomingAspects,
+        ingress: nextJupiterIngress,
         stations: upcomingStations,
         eclipses: upcomingEclipses
       },
       positions: transits?.positions || null,
-      note: hasStaticSwissData()
-        ? "Static Swiss Ephemeris data layer is active. Date-only calculations use exact Swiss Ephemeris positions generated offline at 12:00 UTC for 1990-01-01 through 2032-12-31."
-        : "Static Swiss data file is not available; app will fall back to astronomy-engine."
+      note: "Direct Swiss Ephemeris is active. Returned calculation flags are checked for SEFLG_SWIEPH; any fallback causes a hard failure."
     });
   } catch (err) {
     return res.status(200).json({

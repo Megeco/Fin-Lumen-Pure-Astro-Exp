@@ -37,16 +37,13 @@ import {
   buildNarrativeSynthesis
 } from "../../lib/narrativeSynthesisEngine.js";
 
-import {
-  evaluateNatalValidation
-} from "../../lib/natalValidationEngine.js";
+import { buildDecisionPipelineV35 } from "../../lib/v35/decisionPipeline.js";
 
 export default async function handler(req, res) {
   try {
     const {
       ticker,
-      date,
-      chartId
+      date
     } = req.query;
 
     if (!ticker || !date) {
@@ -56,7 +53,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const company = await resolveCompany(ticker, null, { chartId });
+    const company = await resolveCompany(ticker, null, { asOfDate: date });
 
     if (!company?.found) {
       return res.status(404).json({
@@ -89,7 +86,6 @@ export default async function handler(req, res) {
     const replay = calculateTransitResonance(natal, transitData);
     const windows = scanForwardWindows(natal, date);
     const macro = computeMacroEnvironment ? computeMacroEnvironment(date) : null;
-    const natalValidation = evaluateNatalValidation(company, { selectedChartId: company.selectedChartId || chartId || company.preferredChartId });
     const transitReceptorFit = evaluateTransitReceptorFit({
       company,
       natal,
@@ -116,10 +112,20 @@ export default async function handler(req, res) {
       replay,
       windows,
       macroSnapshot: macro,
-      natalValidation,
       transitReceptorFit,
       replayValidationIntelligence,
       company
+    });
+
+    const decisionV35 = buildDecisionPipelineV35({
+      replayDate: date,
+      replay,
+      windows,
+      macroSnapshot: macro,
+      transitReceptorFit,
+      replayValidationIntelligence,
+      company,
+      historicalContext: null
     });
 
     const readableReplay = {
@@ -168,10 +174,10 @@ export default async function handler(req, res) {
       readableReplay,
       windows,
       macro,
-      natalValidation,
       transitReceptorFit,
       replayValidationIntelligence,
-      narrativeSynthesis
+      narrativeSynthesis,
+      decisionV35
     });
   } catch (err) {
     return res.status(500).json({
